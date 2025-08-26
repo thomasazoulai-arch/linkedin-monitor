@@ -1,0 +1,36 @@
+import smtplib
+from email.mime.text import MimeText
+from email.mime.multipart import MimeMultipart
+
+# Configuration - REMPLACEZ par vos vraies valeurs
+GMAIL_EMAIL = "thomas.azoulai@lilly.com"  # Votre adresse Gmail
+GMAIL_APP_PASSWORD = "jsvp gsbu fqft rjmq"  # Mot de passe d'application (16 caractères)
+RECIPIENT_EMAIL = "thomas.azoulai@gmail.com"  # Où envoyer le test
+
+def test_email():
+    try:
+        # Création du message
+        message = MimeMultipart()
+        message["Subject"] = "Test LinkedIn Monitor"
+        message["From"] = GMAIL_EMAIL
+        message["To"] = RECIPIENT_EMAIL
+        
+        # Contenu du message
+        body = "Test d'envoi d'email pour le système de veille LinkedIn. Si vous recevez ce message, la configuration fonctionne parfaitement !"
+        message.attach(MimeText(body, "plain"))
+        
+        # Envoi via Gmail SMTP
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(GMAIL_EMAIL, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_EMAIL, RECIPIENT_EMAIL, message.as_string())
+        
+        print("✅ Email de test envoyé avec succès !")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Erreur lors de l'envoi: {e}")
+        return False
+
+if __name__ == "__main__":
+    test_email()
