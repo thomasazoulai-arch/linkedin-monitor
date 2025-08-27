@@ -23,7 +23,37 @@ class LinkedInMonitor:
         }
         print(f"✅ LinkedInMonitor initialisé")
     
-    def load_urls_from_csv(self):
+    def create_default_csv(self):
+        """Crée un fichier CSV par défaut s'il n'existe pas"""
+        try:
+            print("📝 Création d'un fichier CSV par défaut")
+            
+            default_data = [
+                {
+                    'URL': 'https://www.linkedin.com/company/microsoft/',
+                    'Name': 'Microsoft',
+                    'Last_Post_ID': ''
+                },
+                {
+                    'URL': 'https://www.linkedin.com/in/satyanadella/',
+                    'Name': 'Satya Nadella',
+                    'Last_Post_ID': ''
+                }
+            ]
+            
+            fieldnames = ['URL', 'Name', 'Last_Post_ID']
+            
+            with open(self.csv_file_path, 'w', encoding='utf-8-sig', newline='') as file:
+                writer = csv.DictWriter(file, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(default_data)
+            
+            print("✅ Fichier CSV créé avec les données par défaut")
+            return default_data
+            
+        except Exception as e:
+            print(f"❌ Erreur création CSV: {e}")
+            return None
         """Charge les URLs depuis le fichier CSV"""
         try:
             print(f"📁 Chargement du fichier: {self.csv_file_path}")
@@ -36,12 +66,27 @@ class LinkedInMonitor:
                 return None
             
             data = []
-            with open(self.csv_file_path, 'r', encoding='utf-8', newline='') as file:
-                reader = csv.DictReader(file)
-                for row in reader:
-                    data.append(row)
             
-            print(f"✅ {len(data)} lignes chargées")
+            # Essaie plusieurs encodages
+            encodings = ['utf-8', 'utf-8-sig', 'iso-8859-1', 'cp1252', 'latin1']
+            
+            for encoding in encodings:
+                try:
+                    print(f"🔄 Tentative avec encodage: {encoding}")
+                    with open(self.csv_file_path, 'r', encoding=encoding, newline='') as file:
+                        reader = csv.DictReader(file)
+                        for row in reader:
+                            data.append(row)
+                    print(f"✅ Succès avec {encoding} - {len(data)} lignes chargées")
+                    break
+                except UnicodeDecodeError:
+                    print(f"❌ Échec avec {encoding}")
+                    data = []
+                    continue
+            
+            if not data:
+                print("❌ Impossible de lire le fichier avec tous les encodages testés")
+                return None
             
             # Ajouter Last_Post_ID si manquant
             for row in data:
@@ -65,12 +110,13 @@ class LinkedInMonitor:
             
             fieldnames = list(data[0].keys())
             
-            with open(self.csv_file_path, 'w', encoding='utf-8', newline='') as file:
+            # Sauvegarde avec encodage UTF-8 et BOM pour compatibilité
+            with open(self.csv_file_path, 'w', encoding='utf-8-sig', newline='') as file:
                 writer = csv.DictWriter(file, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(data)
             
-            print("✅ Fichier sauvegardé")
+            print("✅ Fichier sauvegardé en UTF-8")
             return True
             
         except Exception as e:
