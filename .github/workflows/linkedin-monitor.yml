@@ -7,7 +7,7 @@ on:
   workflow_dispatch:  # Permet l'exécution manuelle pour tests
     inputs:
       force_run:
-        description: 'Forcer l'exécution même sans changement'
+        description: 'Forcer lexecution meme sans changement'
         required: false
         default: 'false'
         type: boolean
