@@ -9,8 +9,15 @@ import hashlib
 import smtplib
 import sys
 import traceback
-from email.mime.text import MimeText
-from email.mime.multipart import MimeMultipart
+
+# Import email modules with fallback
+try:
+    from email.mime.text import MimeText
+    from email.mime.multipart import MimeMultipart
+    EMAIL_LIBS_AVAILABLE = True
+except ImportError:
+    print("⚠️ Email libraries not available, using simple SMTP")
+    EMAIL_LIBS_AVAILABLE = False
 
 class LinkedInMonitor:
     def __init__(self, csv_file_path, email_config):
@@ -219,7 +226,7 @@ class LinkedInMonitor:
             return None
     
     def send_email_notification(self, post_info):
-        """Envoi d'email de notification amélioré"""
+        """Envoi d'email de notification avec fallback"""
         try:
             print(f"📧 Préparation email pour {post_info['profile']}...")
             
@@ -227,14 +234,10 @@ class LinkedInMonitor:
             sender_password = self.email_config['sender_password']
             recipient_email = self.email_config['recipient_email']
             
-            # Création du message
-            message = MimeMultipart()
-            message["Subject"] = f"🔔 Nouveau contenu LinkedIn - {post_info['profile']}"
-            message["From"] = sender_email
-            message["To"] = recipient_email
-            
             # Construction du corps du message
             timestamp_fr = datetime.fromisoformat(post_info['timestamp']).strftime('%d/%m/%Y à %H:%M')
+            
+            subject = f"🔔 Nouveau contenu LinkedIn - {post_info['profile']}"
             
             body = f"""Bonjour,
 
@@ -256,13 +259,31 @@ Un nouveau contenu a été détecté sur LinkedIn !
 Pour consulter le contenu, cliquez sur le lien ci-dessus.
 """
             
-            message.attach(MimeText(body, "plain", "utf-8"))
+            if EMAIL_LIBS_AVAILABLE:
+                # Méthode avec MimeMultipart (préférée)
+                message = MimeMultipart()
+                message["Subject"] = subject
+                message["From"] = sender_email
+                message["To"] = recipient_email
+                message.attach(MimeText(body, "plain", "utf-8"))
+                msg_string = message.as_string()
+            else:
+                # Méthode manuelle simple (fallback)
+                msg_string = f"""From: {sender_email}
+To: {recipient_email}
+Subject: {subject}
+Content-Type: text/plain; charset=utf-8
+
+{body}"""
             
             # Envoi via Gmail SMTP
             with smtplib.SMTP("smtp.gmail.com", 587) as server:
                 server.starttls()
                 server.login(sender_email, sender_password)
-                server.sendmail(sender_email, recipient_email, message.as_string())
+                if EMAIL_LIBS_AVAILABLE:
+                    server.sendmail(sender_email, recipient_email, msg_string)
+                else:
+                    server.sendmail(sender_email, recipient_email, msg_string.encode('utf-8'))
             
             print("✅ Email envoyé avec succès")
             return True
