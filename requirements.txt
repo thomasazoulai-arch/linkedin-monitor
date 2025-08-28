@@ -1,1 +1,26 @@
+# LinkedIn Monitor - Dépendances optimisées
+# Version stable et sécurisée pour production
+
+# HTTP requests avec sécurité renforcée
 requests==2.31.0
+urllib3==2.0.7
+certifi==2023.11.17
+
+# Parsing et manipulation de données
+beautifulsoup4==4.12.2
+lxml==4.9.3
+
+# Gestion des emails avancée
+secure-smtplib==0.1.1
+
+# Sécurité et chiffrement
+cryptography==41.0.8
+
+# Gestion des dates et temps
+python-dateutil==2.8.2
+
+# Utilitaires système
+psutil==5.9.6
+
+# Gestion des types (pour Python < 3.9)
+typing-extensions==4.8.0
