@@ -9,17 +9,20 @@ import hashlib
 import smtplib
 import sys
 import traceback
+from email.mime.text import MimeText
+from email.mime.multipart import MimeMultipart
 
 class LinkedInMonitor:
     def __init__(self, csv_file_path, email_config):
         self.csv_file_path = csv_file_path
         self.email_config = email_config
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'fr-FR,fr;q=0.8,en-US;q=0.5,en;q=0.3',
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
         }
         print(f"✅ LinkedInMonitor initialisé")
     
@@ -35,8 +38,8 @@ class LinkedInMonitor:
                     'Last_Post_ID': ''
                 },
                 {
-                    'URL': 'https://www.linkedin.com/in/satyanadella/',
-                    'Name': 'Satya Nadella',
+                    'URL': 'https://www.linkedin.com/company/tesla-motors/',
+                    'Name': 'Tesla',
                     'Last_Post_ID': ''
                 }
             ]
@@ -54,16 +57,16 @@ class LinkedInMonitor:
         except Exception as e:
             print(f"❌ Erreur création CSV: {e}")
             return None
-        """Charge les URLs depuis le fichier CSV"""
+
+    def load_urls_from_csv(self):
+        """Charge les URLs depuis le fichier CSV - MÉTHODE CORRIGÉE"""
         try:
             print(f"📁 Chargement du fichier: {self.csv_file_path}")
             
             if not os.path.exists(self.csv_file_path):
                 print(f"❌ Fichier {self.csv_file_path} introuvable")
-                print("📂 Fichiers présents:")
-                for file in os.listdir('.'):
-                    print(f"   - {file}")
-                return None
+                print("📂 Création d'un fichier par défaut...")
+                return self.create_default_csv()
             
             data = []
             
@@ -86,7 +89,8 @@ class LinkedInMonitor:
             
             if not data:
                 print("❌ Impossible de lire le fichier avec tous les encodages testés")
-                return None
+                print("📂 Création d'un fichier par défaut...")
+                return self.create_default_csv()
             
             # Ajouter Last_Post_ID si manquant
             for row in data:
@@ -123,25 +127,88 @@ class LinkedInMonitor:
             print(f"❌ Erreur sauvegarde: {e}")
             return False
     
+    def extract_content_info(self, html_content):
+        """Extrait des informations du contenu HTML LinkedIn"""
+        try:
+            # Recherche de patterns spécifiques LinkedIn
+            patterns = {
+                'post_activity': r'<span[^>]*>(\d+)\s*(comments?|likes?|reactions?)',
+                'company_updates': r'posted this',
+                'profile_activity': r'activity-[a-zA-Z0-9]+',
+                'content_hash': r'data-urn="[^"]*"'
+            }
+            
+            info = {
+                'has_recent_activity': False,
+                'activity_indicators': [],
+                'content_snippets': []
+            }
+            
+            for pattern_name, pattern in patterns.items():
+                matches = re.findall(pattern, html_content, re.IGNORECASE)
+                if matches:
+                    info['has_recent_activity'] = True
+                    info['activity_indicators'].append(pattern_name)
+            
+            # Extrait quelques snippets de contenu
+            text_patterns = [
+                r'<span[^>]*class="[^"]*feed-shared-text[^"]*"[^>]*>([^<]+)</span>',
+                r'<h3[^>]*>([^<]+)</h3>',
+                r'<p[^>]*>([^<]+)</p>'
+            ]
+            
+            for pattern in text_patterns:
+                matches = re.findall(pattern, html_content)
+                info['content_snippets'].extend(matches[:3])  # Limite à 3 snippets
+            
+            return info
+            
+        except Exception as e:
+            print(f"❌ Erreur extraction contenu: {e}")
+            return {'has_recent_activity': False, 'activity_indicators': [], 'content_snippets': []}
+    
     def scrape_linkedin_profile(self, url, profile_name):
-        """Scrape simple d'une page LinkedIn"""
+        """Scrape amélioré d'une page LinkedIn"""
         try:
             print(f"🌐 Vérification de {profile_name}...")
             
-            time.sleep(3)
-            response = requests.get(url, headers=self.headers, timeout=15)
+            # Pause pour éviter les limitations
+            time.sleep(5)
+            
+            # Ajout de paramètres pour les pages company
+            if 'company' in url and 'posts' not in url:
+                if not url.endswith('/'):
+                    url += '/'
+                url += 'posts/'
+            
+            response = requests.get(url, headers=self.headers, timeout=20)
             
             if response.status_code == 200:
-                # Génère un ID basé sur le contenu
-                content_sample = response.text[:3000]
-                post_id = hashlib.md5(content_sample.encode('utf-8', errors='ignore')).hexdigest()[:12]
+                print(f"✅ Page accessible ({len(response.text)} caractères)")
+                
+                # Extraction d'informations du contenu
+                content_info = self.extract_content_info(response.text)
+                
+                # Génère un ID basé sur le contenu significatif
+                content_for_hash = response.text[:5000]  # Plus de contenu pour l'ID
+                
+                # Ajoute les indicateurs d'activité à l'ID
+                activity_string = ''.join(content_info['activity_indicators'])
+                snippets_string = ''.join(content_info['content_snippets'][:5])
+                
+                hash_content = content_for_hash + activity_string + snippets_string
+                post_id = hashlib.sha256(hash_content.encode('utf-8', errors='ignore')).hexdigest()[:16]
                 
                 print(f"✅ ID généré: {post_id}")
+                print(f"📊 Activité détectée: {content_info['has_recent_activity']}")
+                
                 return {
                     'id': post_id,
                     'profile': profile_name,
+                    'url': url,
                     'timestamp': datetime.now().isoformat(),
-                    'content': f"Contenu détecté pour {profile_name}"
+                    'content_info': content_info,
+                    'status': 'success'
                 }
             else:
                 print(f"❌ HTTP {response.status_code}")
@@ -151,59 +218,75 @@ class LinkedInMonitor:
             print(f"❌ Erreur scraping: {e}")
             return None
     
-    def send_simple_email(self, post_info):
-        """Envoi d'email ultra-simplifié"""
+    def send_email_notification(self, post_info):
+        """Envoi d'email de notification amélioré"""
         try:
-            print(f"📧 Envoi email...")
+            print(f"📧 Préparation email pour {post_info['profile']}...")
             
             sender_email = self.email_config['sender_email']
             sender_password = self.email_config['sender_password']
             recipient_email = self.email_config['recipient_email']
             
-            # Construction manuelle du message email
-            subject = f"Veille LinkedIn - {post_info['profile']}"
-            body = f"""Nouveau changement detecte sur LinkedIn !
+            # Création du message
+            message = MimeMultipart()
+            message["Subject"] = f"🔔 Nouveau contenu LinkedIn - {post_info['profile']}"
+            message["From"] = sender_email
+            message["To"] = recipient_email
+            
+            # Construction du corps du message
+            timestamp_fr = datetime.fromisoformat(post_info['timestamp']).strftime('%d/%m/%Y à %H:%M')
+            
+            body = f"""Bonjour,
 
-Profil: {post_info['profile']}
-Detecte le: {datetime.fromisoformat(post_info['timestamp']).strftime('%d/%m/%Y a %H:%M')}
-ID: {post_info['id']}
+Un nouveau contenu a été détecté sur LinkedIn !
+
+🏢 Profil/Entreprise : {post_info['profile']}
+🔗 URL : {post_info['url']}
+📅 Détecté le : {timestamp_fr}
+🆔 ID de suivi : {post_info['id']}
+
+📊 Informations détectées :
+• Activité récente : {'Oui' if post_info['content_info']['has_recent_activity'] else 'Non'}
+• Indicateurs : {', '.join(post_info['content_info']['activity_indicators']) if post_info['content_info']['activity_indicators'] else 'Aucun'}
 
 ---
-Systeme de veille automatise
+✨ Système de veille LinkedIn automatisé
+🤖 Propulsé par votre agent autonome
+
+Pour consulter le contenu, cliquez sur le lien ci-dessus.
 """
             
-            # Message au format RFC 2822 simple
-            message = f"""From: {sender_email}
-To: {recipient_email}
-Subject: {subject}
-Content-Type: text/plain; charset=utf-8
-
-{body}"""
+            message.attach(MimeText(body, "plain", "utf-8"))
             
-            # Envoi via SMTP
+            # Envoi via Gmail SMTP
             with smtplib.SMTP("smtp.gmail.com", 587) as server:
                 server.starttls()
                 server.login(sender_email, sender_password)
-                server.sendmail(sender_email, [recipient_email], message.encode('utf-8'))
+                server.sendmail(sender_email, recipient_email, message.as_string())
             
-            print("✅ Email envoyé")
+            print("✅ Email envoyé avec succès")
             return True
             
         except Exception as e:
-            print(f"❌ Erreur email: {e}")
+            print(f"❌ Erreur envoi email: {e}")
             traceback.print_exc()
             return False
     
     def check_for_new_posts(self):
-        """Vérification des nouveaux posts"""
+        """Vérification des nouveaux posts - VERSION CORRIGÉE"""
         try:
-            print(f"🚀 DÉBUT - {datetime.now()}")
+            print(f"🚀 DÉBUT DU MONITORING - {datetime.now()}")
             
-            data = self.load_urls_from_csv()
+            # Chargement des données
+            data = self.load_urls_from_csv()  # Cette méthode existe maintenant !
             if data is None:
+                print("❌ Impossible de charger les données")
                 return False
             
             changes_made = False
+            successful_checks = 0
+            
+            print(f"📋 {len(data)} profils à vérifier")
             
             for i, row in enumerate(data):
                 url = row.get('URL', '').strip()
@@ -211,73 +294,104 @@ Content-Type: text/plain; charset=utf-8
                 last_id = row.get('Last_Post_ID', '').strip()
                 
                 if not url or not name:
+                    print(f"⚠️ Ligne {i+1} ignorée (URL ou nom manquant)")
                     continue
                 
                 print(f"\n--- {i+1}/{len(data)}: {name} ---")
+                print(f"🔗 URL: {url}")
+                print(f"🆔 Dernier ID: {last_id if last_id else 'Aucun'}")
                 
+                # Scraping de la page
                 result = self.scrape_linkedin_profile(url, name)
                 
-                if result:
+                if result and result['status'] == 'success':
+                    successful_checks += 1
                     current_id = result['id']
                     
+                    print(f"🔍 ID actuel: {current_id}")
+                    
+                    # Vérification des changements
                     if last_id != current_id:
-                        print(f"🆕 CHANGEMENT détecté!")
+                        print(f"🆕 CHANGEMENT DÉTECTÉ pour {name}!")
                         
-                        if self.send_simple_email(result):
+                        # Envoi de notification
+                        if self.send_email_notification(result):
                             row['Last_Post_ID'] = current_id
                             changes_made = True
-                            print("✅ Notification envoyée")
+                            print("✅ Notification envoyée et ID mis à jour")
+                        else:
+                            print("❌ Échec envoi notification")
                     else:
-                        print("⚪ Aucun changement")
+                        print("⚪ Aucun changement détecté")
+                else:
+                    print(f"❌ Échec vérification de {name}")
                 
+                # Pause entre les vérifications (sauf pour le dernier)
                 if i < len(data) - 1:
-                    time.sleep(5)
+                    print("⏳ Pause de 8 secondes...")
+                    time.sleep(8)
             
+            # Sauvegarde des modifications
             if changes_made:
-                self.save_urls_to_csv(data)
-                print("💾 Données sauvegardées")
+                if self.save_urls_to_csv(data):
+                    print("💾 Données sauvegardées avec succès")
+                else:
+                    print("❌ Échec sauvegarde")
             
+            # Résumé
+            print(f"\n📊 RÉSUMÉ:")
+            print(f"✅ Vérifications réussies: {successful_checks}/{len(data)}")
+            print(f"📝 Changements détectés: {'Oui' if changes_made else 'Non'}")
             print(f"🏁 FIN - {datetime.now()}")
+            
             return True
             
         except Exception as e:
-            print(f"❌ ERREUR: {e}")
+            print(f"❌ ERREUR CRITIQUE: {e}")
             traceback.print_exc()
             return False
 
 def main():
     try:
-        print("🔧 === DÉMARRAGE ===")
+        print("=" * 50)
+        print("🔧 AGENT LINKEDIN - DÉMARRAGE")
+        print("=" * 50)
         
+        # Configuration
         csv_file = "linkedin_urls.csv"
         
+        # Variables d'environnement
         email_config = {
             'sender_email': os.getenv('GMAIL_EMAIL'),
             'sender_password': os.getenv('GMAIL_APP_PASSWORD'),
             'recipient_email': os.getenv('RECIPIENT_EMAIL')
         }
         
-        print(f"📧 Sender: {email_config['sender_email']}")
-        print(f"📧 Recipient: {email_config['recipient_email']}")
-        print(f"🔑 Password configured: {'Yes' if email_config['sender_password'] else 'No'}")
+        # Vérification configuration
+        print(f"📧 Email expéditeur: {email_config['sender_email']}")
+        print(f"📧 Email destinataire: {email_config['recipient_email']}")
+        print(f"🔑 Mot de passe configuré: {'Oui' if email_config['sender_password'] else 'Non'}")
         
+        # Vérification variables manquantes
         missing_vars = [key for key, value in email_config.items() if not value]
         if missing_vars:
-            print(f"❌ Variables manquantes: {missing_vars}")
+            print(f"❌ Variables d'environnement manquantes: {missing_vars}")
+            print("💡 Assurez-vous que GMAIL_EMAIL, GMAIL_APP_PASSWORD et RECIPIENT_EMAIL sont définies")
             sys.exit(1)
         
+        # Initialisation et lancement
         monitor = LinkedInMonitor(csv_file, email_config)
         success = monitor.check_for_new_posts()
         
         if success:
-            print("✅ SUCCESS")
+            print("✅ MONITORING TERMINÉ AVEC SUCCÈS")
             sys.exit(0)
         else:
-            print("❌ FAILED")
+            print("❌ ÉCHEC DU MONITORING")
             sys.exit(1)
         
     except Exception as e:
-        print(f"❌ ERREUR FATALE: {e}")
+        print(f"💥 ERREUR FATALE: {e}")
         traceback.print_exc()
         sys.exit(1)
 
