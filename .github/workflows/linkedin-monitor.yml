@@ -1,29 +1,40 @@
 name: LinkedIn Monitor Production
 
+# ✅ PERMISSIONS OBLIGATOIRES - SOLUTION AU PROBLÈME 403
+permissions:
+  contents: write      # Permission d'écrire dans le repository
+  actions: read        # Permission de lire les actions
+  checks: read         # Permission de lire les vérifications
+  pull-requests: write # Permission pour les PR si nécessaire
+
 on:
   schedule:
-    # Exécution toutes les 12 heures (optimisé pour éviter les limitations)
-    - cron: '0 6,18 * * *'  # 6h00 et 18h00 UTC
-  workflow_dispatch:  # Permet l'exécution manuelle pour tests
+    # Exécution optimisée toutes les 8 heures pour éviter les limitations
+    - cron: '0 6,14,22 * * *'  # 6h00, 14h00 et 22h00 UTC
+  workflow_dispatch:
     inputs:
       force_run:
-        description: 'Forcer lexecution meme sans changement'
+        description: 'Forcer l execution même sans changement'
+        required: false
+        default: 'false'
+        type: boolean
+      debug_mode:
+        description: 'Mode debug avec logs détaillés'
         required: false
         default: 'false'
         type: boolean
 
-# Variables d'environnement globales
+# Variables d'environnement globales optimisées
 env:
   PYTHON_VERSION: '3.11'
-  TIMEOUT_MINUTES: 25
+  TIMEOUT_MINUTES: 30
+  PIP_CACHE_DIR: /tmp/.pip-cache
 
 jobs:
   linkedin-monitor:
-    name: 🤖 Agent LinkedIn Monitoring
+    name: 🤖 LinkedIn Monitoring Agent Expert
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    
-    # Stratégie de gestion d'erreur
+    timeout-minutes: 30
     continue-on-error: false
     
     steps:
@@ -32,192 +43,338 @@ jobs:
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 1
+        # Assure que les modifications peuvent être poussées
+        persist-credentials: true
     
     - name: 🐍 Configuration Python ${{ env.PYTHON_VERSION }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         cache: 'pip'
         cache-dependency-path: 'requirements.txt'
     
-    - name: 📦 Installation des dépendances
+    - name: 📦 Installation optimisée des dépendances
       run: |
-        echo "🔧 Installation des dépendances Python..."
-        python -m pip install --upgrade pip
-        pip install --no-cache-dir -r requirements.txt
-        echo "✅ Dépendances installées avec succès"
+        echo "🔧 Installation des dépendances Python optimisée..."
+        python -m pip install --upgrade pip setuptools wheel
         
-        # Vérification des packages
-        echo "📋 Packages installés:"
-        pip list
+        # Installation depuis requirements.txt avec cache
+        if [ -f requirements.txt ]; then
+          pip install --no-cache-dir --upgrade -r requirements.txt
+        else
+          echo "⚠️ requirements.txt non trouvé, installation manuelle"
+          pip install requests==2.31.0
+        fi
+        
+        echo "✅ Installation terminée"
+        pip list | grep -E "(requests|urllib3|certifi)"
     
-    - name: 🔍 Diagnostic de l'environnement
+    - name: 🔍 Diagnostic environnement avancé
       run: |
-        echo "=" * 50
-        echo "🔍 DIAGNOSTIC ENVIRONNEMENT"
-        echo "=" * 50
-        echo "🐍 Version Python: $(python --version)"
-        echo "📅 Date/Heure: $(date)"
-        echo "🌍 Timezone: $(timedatectl show --property=Timezone --value 2>/dev/null || echo 'UTC')"
-        echo "💾 Espace disque:"
-        df -h . || echo "Impossible d'obtenir l'info disque"
+        echo "=" * 60
+        echo "🔍 DIAGNOSTIC COMPLET DE L'ENVIRONNEMENT"
+        echo "=" * 60
+        echo "🐍 Python: $(python --version)"
+        echo "📅 Date/Heure: $(date -u) UTC"
+        echo "🌍 Timezone: UTC"
+        echo "💻 OS: $(uname -a)"
+        echo "💾 Mémoire: $(free -h | head -n 2)"
+        echo "💽 Espace disque: $(df -h . | tail -1)"
+        echo "🌐 IP publique: $(curl -s ifconfig.me || echo 'Non disponible')"
         echo ""
         
-        echo "📂 Fichiers du projet:"
+        echo "📂 Structure du projet:"
         ls -la
         echo ""
         
-        echo "📝 Contenu CSV actuel:"
+        if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then
+          echo "🐛 MODE DEBUG ACTIVÉ"
+          echo "📋 Variables d'environnement (filtrées):"
+          env | grep -E "(GITHUB_|RUNNER_)" | head -10
+          echo ""
+        fi
+        
+        echo "📄 Contenu CSV actuel:"
         if [ -f "linkedin_urls.csv" ]; then
-          echo "✅ Fichier CSV trouvé ($(wc -l < linkedin_urls.csv) lignes)"
+          echo "✅ Fichier trouvé ($(wc -l < linkedin_urls.csv) lignes)"
+          echo "--- Aperçu (3 premières lignes) ---"
           head -3 linkedin_urls.csv
-          if [ $(wc -l < linkedin_urls.csv) -gt 3 ]; then
-            echo "..."
-          fi
         else
-          echo "❌ Fichier CSV manquant - sera créé automatiquement"
+          echo "❌ linkedin_urls.csv manquant - sera créé automatiquement"
         fi
-        echo "=" * 50
+        echo "=" * 60
     
-    - name: 🔐 Validation des secrets
+    - name: 🔐 Validation secrets et configuration
       run: |
-        echo "🔐 Validation de la configuration..."
+        echo "🔐 Validation de la configuration sécurisée..."
         
-        # Vérification des variables obligatoires (sans afficher les valeurs)
-        if [ -z "${{ secrets.GMAIL_EMAIL }}" ]; then
-          echo "❌ GMAIL_EMAIL manquant"
+        # Fonction de validation sans exposition des valeurs
+        validate_secret() {
+          local name=$1
+          local value=$2
+          if [ -n "$value" ] && [ ${#value} -gt 3 ]; then
+            echo "✅ $name: Configuré (${#value} caractères)"
+            return 0
+          else
+            echo "❌ $name: Manquant ou trop court"
+            return 1
+          fi
+        }
+        
+        # Validation de chaque secret
+        VALIDATION_FAILED=0
+        
+        validate_secret "GMAIL_EMAIL" "${{ secrets.GMAIL_EMAIL }}" || VALIDATION_FAILED=1
+        validate_secret "GMAIL_APP_PASSWORD" "${{ secrets.GMAIL_APP_PASSWORD }}" || VALIDATION_FAILED=1
+        validate_secret "RECIPIENT_EMAIL" "${{ secrets.RECIPIENT_EMAIL }}" || VALIDATION_FAILED=1
+        
+        if [ $VALIDATION_FAILED -eq 1 ]; then
+          echo ""
+          echo "❌ CONFIGURATION INCOMPLÈTE"
+          echo "💡 Actions à effectuer:"
+          echo "   1. Aller dans Settings → Secrets and variables → Actions"
+          echo "   2. Vérifier que tous les secrets sont bien configurés"
+          echo "   3. Pour GMAIL_APP_PASSWORD, utiliser un mot de passe d'application Gmail"
           exit 1
         fi
         
-        if [ -z "${{ secrets.GMAIL_APP_PASSWORD }}" ]; then
-          echo "❌ GMAIL_APP_PASSWORD manquant" 
-          exit 1
-        fi
-        
-        if [ -z "${{ secrets.RECIPIENT_EMAIL }}" ]; then
-          echo "❌ RECIPIENT_EMAIL manquant"
-          exit 1
-        fi
-        
-        echo "✅ Tous les secrets requis sont configurés"
-        echo "📧 Email expéditeur: ${{ secrets.GMAIL_EMAIL }}"
-        echo "📧 Email destinataire: ${{ secrets.RECIPIENT_EMAIL }}"
-        echo "🔑 Mot de passe: [CONFIGURÉ]"
+        echo "✅ Tous les secrets sont correctement configurés"
     
-    - name: 🤖 Exécution de l'Agent LinkedIn
+    - name: 🔧 Test des permissions Git
+      run: |
+        echo "🔧 Configuration et test des permissions Git..."
+        
+        # Configuration Git sécurisée
+        git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git config --local init.defaultBranch main
+        git config --local core.autocrlf false
+        
+        # Test des permissions
+        echo "🔍 Test des permissions Git..."
+        git status
+        
+        # Vérification de la configuration
+        echo "📋 Configuration Git:"
+        echo "   Email: $(git config user.email)"
+        echo "   Nom: $(git config user.name)"
+        echo "   Remote: $(git remote get-url origin)"
+        
+        echo "✅ Git configuré et permissions vérifiées"
+    
+    - name: 🤖 Exécution de l'Agent LinkedIn Expert
       env:
         GMAIL_EMAIL: ${{ secrets.GMAIL_EMAIL }}
         GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         FORCE_RUN: ${{ github.event.inputs.force_run }}
+        DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
         GITHUB_RUN_ID: ${{ github.run_id }}
         GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
       run: |
-        echo "🚀 Lancement de l'Agent LinkedIn Monitoring..."
-        echo "🔢 Run ID: $GITHUB_RUN_ID"
-        echo "📊 Run Number: $GITHUB_RUN_NUMBER"
+        echo "🚀 Lancement de l'Agent LinkedIn Monitoring Expert..."
+        echo "🏃 Run #$GITHUB_RUN_NUMBER (ID: $GITHUB_RUN_ID)"
+        echo "📦 Repository: $GITHUB_REPOSITORY"
+        echo "🔧 Force run: ${FORCE_RUN:-false}"
+        echo "🐛 Debug mode: ${DEBUG_MODE:-false}"
         echo ""
         
-        # Lancement avec gestion d'erreur
+        # Lancement avec gestion d'erreur améliorée
+        START_TIME=$(date +%s)
+        
         if python linkedin_monitor.py; then
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
           echo ""
           echo "✅ Agent exécuté avec succès!"
+          echo "⏱️ Durée: ${DURATION}s"
         else
+          EXIT_CODE=$?
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
           echo ""
-          echo "❌ Échec de l'agent (code: $?)"
-          exit 1
+          echo "❌ Échec de l'agent (code: $EXIT_CODE, durée: ${DURATION}s)"
+          
+          # Log des dernières lignes pour diagnostic
+          if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then
+            echo "🔍 Diagnostic d'erreur activé"
+          fi
+          
+          exit $EXIT_CODE
         fi
     
-    - name: 💾 Sauvegarde des modifications
-      if: success() || failure()  # Exécute même en cas d'échec partiel
+    - name: 💾 Sauvegarde sécurisée des modifications
+      if: always()  # Exécute même en cas d'échec partiel
       run: |
         echo "💾 Vérification et sauvegarde des modifications..."
         
-        # Configuration Git
-        git config --local user.email "linkedin-agent@github-actions.com"
-        git config --local user.name "LinkedIn Monitor Agent"
-        git config --local user.signingkey ""
-        git config --local commit.gpgsign false
-        
-        # Vérification des fichiers modifiés
-        echo "📋 Statut Git:"
+        # Vérification du statut Git
+        echo "📋 Statut Git actuel:"
         git status --porcelain
         
-        # Ajout des fichiers
-        git add linkedin_urls.csv 2>/dev/null || echo "⚠️ Pas de CSV à ajouter"
+        # Vérification des fichiers modifiés
+        if [ -f "linkedin_urls.csv" ]; then
+          git add linkedin_urls.csv
+          echo "✅ CSV ajouté au staging"
+        else
+          echo "⚠️ Aucun fichier CSV à ajouter"
+        fi
         
-        # Commit conditionnel
+        # Commit conditionnel avec informations enrichies
         if git diff --staged --quiet; then
           echo "📝 Aucune modification à sauvegarder"
         else
-          echo "💾 Sauvegarde des modifications..."
-          COMMIT_MSG="🔄 LinkedIn monitoring update - Run #${{ github.run_number }} [$(date '+%Y-%m-%d %H:%M UTC')]"
+          echo "💾 Sauvegarde des modifications en cours..."
+          
+          # Message de commit informatif
+          COMMIT_MSG="🔄 LinkedIn monitoring update
+
+          • Run: #${{ github.run_number }} (ID: ${{ github.run_id }})
+          • Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          • Trigger: ${{ github.event_name }}
+          • Branch: ${{ github.ref_name }}
+          $(if [ '${{ github.event_name }}' = 'workflow_dispatch' ]; then echo '• Manual trigger: force_run=${{ github.event.inputs.force_run }}'; fi)
+          
+          Automated LinkedIn profile monitoring update"
+          
           git commit -m "$COMMIT_MSG"
           
-          # Push avec retry en cas d'échec
-          for i in {1..3}; do
-            if git push; then
-              echo "✅ Modifications poussées vers GitHub (tentative $i)"
+          # Push sécurisé avec retry intelligent
+          echo "📤 Envoi vers GitHub..."
+          PUSH_SUCCESS=false
+          
+          for attempt in {1..5}; do
+            echo "🔄 Tentative de push $attempt/5..."
+            
+            if git push origin HEAD; then
+              echo "✅ Modifications poussées vers GitHub (tentative $attempt)"
+              PUSH_SUCCESS=true
               break
             else
-              echo "⚠️ Échec push tentative $i/3"
-              if [ $i -eq 3 ]; then
-                echo "❌ Impossible de pousser après 3 tentatives"
-                exit 1
+              PUSH_EXIT_CODE=$?
+              echo "⚠️ Échec push tentative $attempt/5 (code: $PUSH_EXIT_CODE)"
+              
+              if [ $attempt -lt 5 ]; then
+                WAIT_TIME=$((attempt * 10))
+                echo "⏳ Attente ${WAIT_TIME}s avant nouvelle tentative..."
+                sleep $WAIT_TIME
+                
+                # Tentative de synchronisation en cas de conflit
+                if [ $PUSH_EXIT_CODE -eq 1 ]; then
+                  echo "🔄 Tentative de synchronisation..."
+                  git pull --rebase origin HEAD || echo "⚠️ Rebase échoué"
+                fi
               fi
-              sleep 5
             fi
           done
+          
+          if [ "$PUSH_SUCCESS" != "true" ]; then
+            echo "❌ ÉCHEC CRITIQUE: Impossible de pousser après 5 tentatives"
+            echo "🔍 Diagnostic:"
+            echo "   • Vérifiez les permissions du repository"
+            echo "   • Vérifiez la section 'permissions' du workflow"
+            echo "   • Token utilisé: GITHUB_TOKEN (builtin)"
+            exit 1
+          fi
         fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
-    - name: 📊 Rapport d'exécution
-      if: always()  # Exécute toujours, même en cas d'erreur
+    - name: 📊 Rapport d'exécution complet
+      if: always()
       run: |
         echo ""
-        echo "=" * 60
-        echo "📊 RAPPORT D'EXÉCUTION FINAL"
-        echo "=" * 60
+        echo "=" * 80
+        echo "📊 RAPPORT D'EXÉCUTION FINAL DÉTAILLÉ"
+        echo "=" * 80
         echo "🔧 Workflow: ${{ github.workflow }}"
         echo "🌿 Branche: ${{ github.ref_name }}"
-        echo "📅 Date: $(date)"
-        echo "🏃 Run #${{ github.run_number }} (ID: ${{ github.run_id }})"
+        echo "📅 Début: ${{ github.event.head_commit.timestamp }}"
+        echo "📅 Fin: $(date -u)"
+        echo "🏃 Run: #${{ github.run_number }} (ID: ${{ github.run_id }})"
         echo "⚙️ Déclencheur: ${{ github.event_name }}"
+        echo "👤 Acteur: ${{ github.actor }}"
         
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          echo "👤 Déclenché manuellement"
-          echo "🔧 Force run: ${{ github.event.inputs.force_run }}"
+          echo "🎛️ Paramètres manuels:"
+          echo "   • Force run: ${{ github.event.inputs.force_run }}"
+          echo "   • Debug mode: ${{ github.event.inputs.debug_mode }}"
         fi
         
-        # Statut final
-        if [ "${{ job.status }}" = "success" ]; then
-          echo "✅ STATUT: SUCCÈS COMPLET"
-        else
-          echo "❌ STATUT: ÉCHEC ou ERREUR"
-        fi
+        # Statut du job avec couleurs
+        case "${{ job.status }}" in
+          "success")
+            echo "✅ STATUT: SUCCÈS COMPLET"
+            ;;
+          "failure")
+            echo "❌ STATUT: ÉCHEC"
+            ;;
+          "cancelled")
+            echo "🚫 STATUT: ANNULÉ"
+            ;;
+          *)
+            echo "❓ STATUT: ${{ job.status }}"
+            ;;
+        esac
         
-        # Informations sur les fichiers
+        # Informations sur les fichiers finaux
         echo ""
         echo "📁 État final des fichiers:"
-        ls -la linkedin_urls.csv 2>/dev/null && echo "✅ CSV présent" || echo "❌ CSV manquant"
+        if [ -f "linkedin_urls.csv" ]; then
+          LINE_COUNT=$(wc -l < linkedin_urls.csv)
+          FILE_SIZE=$(du -h linkedin_urls.csv | cut -f1)
+          echo "✅ linkedin_urls.csv: $LINE_COUNT lignes, $FILE_SIZE"
+        else
+          echo "❌ linkedin_urls.csv: Manquant"
+        fi
         
-        echo "=" * 60
+        # Liens utiles
+        echo ""
+        echo "🔗 Liens utiles:"
+        echo "   • Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        echo "   • Repository: ${{ github.server_url }}/${{ github.repository }}"
+        echo "   • Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
+        
+        echo "=" * 80
         echo "🏁 Fin du rapport d'exécution"
-        echo "=" * 60
+        echo "=" * 80
     
-    - name: 🚨 Notification d'échec (si erreur)
+    - name: 🚨 Notification d'échec avancée
       if: failure()
       run: |
-        echo "🚨 ÉCHEC DÉTECTÉ - Informations de débogage:"
+        echo ""
+        echo "🚨" "=" * 60 "🚨"
+        echo "🚨 ÉCHEC DÉTECTÉ - DIAGNOSTIC COMPLET"
+        echo "🚨" "=" * 60 "🚨"
+        
+        echo "📋 Informations de l'échec:"
+        echo "   • Repository: ${{ github.repository }}"
+        echo "   • Branche: ${{ github.ref_name }}"
         echo "   • Run ID: ${{ github.run_id }}"
         echo "   • Commit: ${{ github.sha }}"
-        echo "   • Branche: ${{ github.ref_name }}"
-        echo "   • Voir les logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        echo "   • Acteur: ${{ github.actor }}"
+        echo "   • Timestamp: $(date -u)"
+        
         echo ""
-        echo "🔧 Actions recommandées:"
-        echo "   1. Vérifier les secrets GitHub"
-        echo "   2. Contrôler la validité des URLs LinkedIn"
-        echo "   3. Tester localement avec les mêmes variables"
+        echo "🔍 Diagnostic suggéré:"
+        echo "   1. 🔐 Vérifier la configuration des secrets GitHub"
+        echo "   2. 🌐 Contrôler la connectivité réseau et les URLs LinkedIn"
+        echo "   3. 📧 Tester l'envoi d'emails avec les identifiants configurés"
+        echo "   4. 🐛 Activer le mode debug pour plus d'informations"
+        echo "   5. 📝 Consulter les logs détaillés via le lien ci-dessous"
+        
         echo ""
-        exit 0  # Ne pas faire échouer le workflow pour la notification
+        echo "📞 Actions de récupération:"
+        echo "   • Relancer manuellement: Repository → Actions → ${{ github.workflow }} → Run workflow"
+        echo "   • Mode debug: Cocher 'Mode debug' lors du lancement manuel"
+        echo "   • Vérifier secrets: Settings → Secrets and variables → Actions"
+        
+        echo ""
+        echo "🔗 Lien direct vers les logs:"
+        echo "   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        
+        echo "🚨" "=" * 60 "🚨"
+        
+        # N'échoue pas le workflow pour la notification
+        exit 0
