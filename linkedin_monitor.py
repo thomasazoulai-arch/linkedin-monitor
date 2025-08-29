@@ -414,12 +414,7 @@ class GroupedEmailNotifier:
             # Sujet spécifique aux nouvelles publications
             post_count = len(all_new_posts)
             profiles_count = len(set(post.profile_name for post in all_new_posts))
-            msg['Subject'] = f"🔔 LinkedIn - {post_count} nouveau{'x' if post_count > 1 else ''} post{'s' if post_count > 1 else ''} publié{'s' if post_count > 1 else ''} ({profiles_count} profile{'s' if profiles_count > 1 else ''})"msg['To'] = self.recipient_email
-            
-            # Sujet dynamique
-            post_count = len(all_new_posts)
-            profiles_count = len(set(post.profile_name for post in all_new_posts))
-            msg['Subject'] = f"🔔 LinkedIn Alert - {post_count} nouveau{'x' if post_count > 1 else ''} post{'s' if post_count > 1 else ''} de {profiles_count} profile{'s' if profiles_count > 1 else ''}"
+            msg['Subject'] = f"🔔 LinkedIn - {post_count} nouveau{'x' if post_count > 1 else ''} post{'s' if post_count > 1 else ''} publié{'s' if post_count > 1 else ''} ({profiles_count} profile{'s' if profiles_count > 1 else ''})"            msg['To'] = self.recipient_email
             
             # Contenu texte
             text_content = self._build_grouped_text_message(all_new_posts)
@@ -891,15 +886,16 @@ class LinkedInMonitor:
             if changes_made:
                 self.save_profiles(profiles)
             
-            # Envoi de la notification groupée
+            # Envoi de la notification groupée UNIQUEMENT si nouveaux posts
             if self.all_new_posts:
-                print(f"\n📧 Envoi notification groupée: {len(self.all_new_posts)} posts")
+                print(f"\n📧 Envoi notification pour {len(self.all_new_posts)} nouveau{'x' if len(self.all_new_posts) > 1 else ''} post{'s' if len(self.all_new_posts) > 1 else ''} publié{'s' if len(self.all_new_posts) > 1 else ''}...")
                 if self.notifier.send_grouped_notification(self.all_new_posts):
                     print("✅ Notification groupée envoyée avec succès")
                 else:
                     print("❌ Échec notification groupée")
             else:
-                print("\n📧 Aucun nouveau post à notifier")
+                print("\n📧 Aucun nouveau post publié - Aucune notification envoyée")
+                print("ℹ️ L'agent surveille uniquement les nouvelles publications (pas les likes/commentaires)")
             
             # Rapport final
             self._print_report()
@@ -978,10 +974,11 @@ def main():
         print("🎯" + "=" * 78 + "🎯")
         print("🤖 LINKEDIN MONITORING AGENT - VERSION AMÉLIORÉE")
         print("🔥 Nouvelles fonctionnalités:")
-        print("   • 📧 Notifications groupées intelligentes") 
-        print("   • 🔗 Extraction directe des liens de posts")
-        print("   • 📝 Descriptions automatiques des contenus")
-        print("   • 🎨 Interface email moderne et responsive")
+        print("   • 🎯 Détection UNIQUEMENT des nouveaux posts publiés")
+        print("   • 🚫 Exclusion des likes, commentaires et autres activités") 
+        print("   • 🔗 URLs directes des posts (format /posts/company_activity-...)")
+        print("   • 📧 Email envoyé UNIQUEMENT s'il y a de nouveaux posts")
+        print("   • 📝 Format optimisé avec titre, description et URL")
         print("🎯" + "=" * 78 + "🎯")
         
         # Validation
@@ -995,7 +992,9 @@ def main():
         if success:
             print("🎉 MONITORING TERMINÉ AVEC SUCCÈS")
             if monitor.all_new_posts:
-                print(f"🚀 {len(monitor.all_new_posts)} nouveaux posts détectés et notifiés")
+                print(f"🚀 {len(monitor.all_new_posts)} nouveau{'x' if len(monitor.all_new_posts) > 1 else ''} post{'s' if len(monitor.all_new_posts) > 1 else ''} publié{'s' if len(monitor.all_new_posts) > 1 else ''} détecté{'s' if len(monitor.all_new_posts) > 1 else ''} et notifié{'s' if len(monitor.all_new_posts) > 1 else ''}")
+            else:
+                print("📭 Aucun nouveau post publié - Surveillance continue active")
             sys.exit(0)
         else:
             print("💥 ÉCHEC DU MONITORING")
