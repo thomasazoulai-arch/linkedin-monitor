@@ -1,30 +1,89 @@
-name: LinkedIn Monitor
-
-permissions:
-  contents: write
-  actions: read
+name: LinkedIn Monitor Agent
 
 on:
   schedule:
-    - cron: '0 8,16 * * *'  # 8h et 16h UTC
-  workflow_dispatch:
+    # Exécution toutes les 12 heures (à 8h00 et 20h00 UTC)
+    - cron: '0 8,20 * * *'
+  workflow_dispatch:  # Permet l'exécution manuelle
     inputs:
-      force_run:
-        description: 'Forcer l exécution'
+      debug_mode:
+        description: 'Activer le mode debug'
         required: false
         default: 'false'
-        type: boolean
-
-env:
-  PYTHON_VERSION: '3.11'
 
 jobs:
-  linkedin-monitor:
-    name: 🔔 LinkedIn Alerts
+  monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30  # Timeout de sécurité
     
     steps:
-    - name: 📥 Checkout code
+    - name: 📥 Checkout repository
       uses: actions/checkout@v4
-      with
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 1
+    
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        echo "✅ Dépendances installées"
+    
+    - name: 📊 Check files
+      run: |
+        echo "📂 Fichiers présents:"
+        ls -la
+        echo "📝 Contenu du CSV:"
+        if [ -f "linkedin_urls.csv" ]; then
+          head -5 linkedin_urls.csv
+        else
+          echo "❌ Fichier CSV manquant - sera créé automatiquement"
+        fi
+    
+    - name: 🤖 Run LinkedIn Monitor Agent
+      env:
+        GMAIL_EMAIL: ${{ secrets.GMAIL_EMAIL }}
+        GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+        DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
+      run: |
+        echo "🚀 Lancement de l'agent LinkedIn..."
+        python linkedin_monitor.py
+    
+    - name: 💾 Commit and push changes
+      run: |
+        # Configuration Git
+        git config --local user.email "action@github.com"
+        git config --local user.name "LinkedIn Monitor Agent"
+        
+        # Ajout des fichiers modifiés
+        git add linkedin_urls.csv
+        git add linkedin_urls.xlsx 2>/dev/null || true  # Ignore si inexistant
+        
+        # Commit seulement s'il y a des changements
+        if git diff --staged --quiet; then
+          echo "📝 Aucun changement à committer"
+        else
+          git commit -m "🔄 Update LinkedIn monitoring data [$(date '+%Y-%m-%d %H:%M:%S')]"
+          git push
+          echo "✅ Changements sauvegardés"
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: 📋 Summary
+      run: |
+        echo "=============================================="
+        echo "🏁 RÉSUMÉ DE L'EXÉCUTION"
+        echo "=============================================="
+        echo "📅 Date: $(date)"
+        echo "🔧 Workflow: ${{ github.workflow }}"
+        echo "🌿 Branch: ${{ github.ref_name }}"
+        echo "✅ Agent LinkedIn exécuté avec succès"
+        echo "=============================================="
