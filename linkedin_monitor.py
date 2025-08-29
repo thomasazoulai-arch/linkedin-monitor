@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-LinkedIn Monitor Agent - Version Production Améliorée
+LinkedIn Monitor Agent - Version Production Optimisée
 Fonctionnalités:
-- Email groupé pour tous les nouveaux posts
-- Extraction directe des liens et métadonnées des posts
-- Descriptions automatiques des posts
+- Détection UNIQUEMENT des nouveaux posts publiés (pas likes/commentaires)
+- Email groupé conditionnel (envoyé seulement si nouveaux posts)
+- Extraction des vraies URLs LinkedIn des posts
+- Descriptions automatiques intelligentes
 """
 import requests
 import csv
@@ -58,21 +59,6 @@ class PostExtractor:
         """Extraction uniquement des nouveaux posts publiés (pas les likes/commentaires)"""
         try:
             posts_data = []
-            
-            # Patterns spécifiques pour les POSTS PUBLIÉS uniquement
-            published_post_patterns = [
-                # Pattern pour les posts d'entreprise avec activité de publication
-                r'<div[^>]*data-urn="urn:li:activity:(\d+)"[^>]*>.*?posted\s+this.*?</div>',
-                r'<div[^>]*data-urn="urn:li:activity:(\d+)"[^>]*>.*?published.*?</div>',
-                r'<div[^>]*data-urn="urn:li:activity:(\d+)"[^>]*>.*?shared\s+this.*?</div>',
-                
-                # Pattern pour identifier les vraies URLs de posts dans le HTML
-                r'href="(/posts/[^"]*activity-(\d+)[^"]*)"',
-                r'data-tracking-control-name="[^"]*"[^>]*href="(/posts/[^"]*activity-(\d+)[^"]*)"',
-                
-                # Pattern alternatif pour les posts avec feed-shared-update-v2
-                r'<div[^>]*feed-shared-update-v2[^>]*data-urn="[^"]*:activity:(\d+)"[^>]*>((?:(?!</div>).)*posted\s+this(?:(?!</div>).)*)</div>'
-            ]
             
             print(f"🔍 Recherche de posts publiés pour {profile_name}...")
             
@@ -311,60 +297,6 @@ class PostExtractor:
         return text
     
     @staticmethod
-    def _build_post_url(post_id: str, profile_url: str) -> str:
-        """Construction de l'URL directe du post"""
-        try:
-            # Nettoyer l'ID
-            clean_id = re.sub(r'[^0-9]', '', str(post_id))
-            
-            if '/company/' in profile_url:
-                # URL pour les pages entreprise
-                company_name = re.search(r'/company/([^/]+)', profile_url)
-                if company_name and clean_id:
-                    return f"https://www.linkedin.com/feed/update/urn:li:activity:{clean_id}"
-            
-            elif '/in/' in profile_url:
-                # URL pour les profils personnels
-                if clean_id:
-                    return f"https://www.linkedin.com/feed/update/urn:li:activity:{clean_id}"
-            
-            # Fallback vers le profil
-            return profile_url.rstrip('/posts').rstrip('/')
-            
-        except Exception:
-            return profile_url
-    
-    @staticmethod
-    def _fallback_extraction(html: str, profile_url: str, profile_name: str) -> List[PostData]:
-        """Méthode de fallback si l'extraction standard échoue"""
-        try:
-            # Recherche de contenu général
-            general_patterns = [
-                r'<span[^>]*>([^<]{50,200})</span>',
-                r'<p[^>]*>([^<]{30,150})</p>'
-            ]
-            
-            posts_found = []
-            for pattern in general_patterns:
-                matches = re.findall(pattern, html, re.IGNORECASE)
-                for i, match in enumerate(matches[:2]):  # Max 2 posts
-                    clean_text = PostExtractor._clean_html_text(match)
-                    if len(clean_text.strip()) > 30:
-                        posts_found.append(PostData(
-                            profile_name=profile_name,
-                            post_title="Nouvelle activité",
-                            post_description=clean_text[:120] + "...",
-                            post_url=profile_url,
-                            detection_time=datetime.now().strftime('%d/%m/%Y à %H:%M')
-                        ))
-                        break
-            
-            return posts_found
-            
-        except Exception:
-            return []
-    
-    @staticmethod
     def _clean_html_text(html_text: str) -> str:
         """Nettoyage du texte HTML"""
         if not html_text:
@@ -389,7 +321,7 @@ class PostExtractor:
 
 
 class GroupedEmailNotifier:
-    """Gestionnaire d'email groupé pour plusieurs posts"""
+    """Gestionnaire d'email groupé pour nouveaux posts uniquement"""
     
     def __init__(self, sender_email: str, sender_password: str, recipient_email: str):
         self.sender_email = sender_email
@@ -404,7 +336,7 @@ class GroupedEmailNotifier:
                 print("ℹ️ Aucun nouveau post publié - Aucun email envoyé")
                 return True
             
-            print(f"📧 Préparation email pour {len(all_new_posts)} nouveau{'x' if len(all_new_posts) > 1 else ''} post{'s' if len(all_new_posts) > 1 else ''} publié{'s' if len(all_new_posts) > 1 else ''}...")
+            print(f"📧 Préparation email pour {len(all_new_posts)} nouveau post{'s' if len(all_new_posts) > 1 else ''} publié{'s' if len(all_new_posts) > 1 else ''}...")
             
             # Création du message
             msg = MIMEMultipart('alternative')
@@ -414,7 +346,18 @@ class GroupedEmailNotifier:
             # Sujet spécifique aux nouvelles publications
             post_count = len(all_new_posts)
             profiles_count = len(set(post.profile_name for post in all_new_posts))
-            msg['Subject'] = f"🔔 LinkedIn - {post_count} nouveau{'x' if post_count > 1 else ''} post{'s' if post_count > 1 else ''} publié{'s' if post_count > 1 else ''} ({profiles_count} profile{'s' if profiles_count > 1 else ''})"            msg['To'] = self.recipient_email
+            
+            subject = f"🔔 LinkedIn - {post_count} nouveau post"
+            if post_count > 1:
+                subject += "s"
+            subject += " publié"
+            if post_count > 1:
+                subject += "s"
+            subject += f" ({profiles_count} profile"
+            if profiles_count > 1:
+                subject += "s"
+            subject += ")"
+            msg['Subject'] = subject
             
             # Contenu texte
             text_content = self._build_grouped_text_message(all_new_posts)
@@ -445,7 +388,7 @@ class GroupedEmailNotifier:
         content = f"""🔔 NOUVEAUX POSTS LINKEDIN DÉTECTÉS
 
 📅 Rapport du {datetime.now().strftime('%d/%m/%Y à %H:%M UTC')}
-📊 {len(posts)} nouveau{'x' if len(posts) > 1 else ''} post{'s' if len(posts) > 1 else ''} publié{'s' if len(posts) > 1 else ''}
+📊 {len(posts)} nouveau post{'s' if len(posts) > 1 else ''} publié{'s' if len(posts) > 1 else ''}
 
 """
         
@@ -488,7 +431,7 @@ Configuration: Seules les nouvelles publications sont surveillées (pas les like
 <html>
 <head>
     <meta charset="utf-8">
-    <title>LinkedIn Alert - Posts Groupés</title>
+    <title>LinkedIn Alert - Nouveaux Posts</title>
     <style>
         body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
         .header {{ background: linear-gradient(135deg, #0077b5, #005885); color: white; padding: 25px; border-radius: 10px; text-align: center; margin-bottom: 20px; }}
@@ -496,22 +439,18 @@ Configuration: Seules les nouvelles publications sont surveillées (pas les like
         .profile-section {{ background: #ffffff; border-left: 4px solid #0077b5; margin: 20px 0; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
         .post-card {{ background: #f8f9fa; margin: 15px 0; padding: 18px; border-radius: 8px; border-left: 3px solid #28a745; }}
         .post-title {{ font-weight: bold; color: #2c3e50; font-size: 16px; margin-bottom: 8px; }}
-        .post-description {{ color: #555; font-style: italic; margin-bottom: 10px; line-height: 1.5; }}
-        .post-url {{ margin: 10px 0; }}
-        .post-meta {{ color: #666; font-size: 12px; }}
-        .cta-button {{ background: #0077b5; color: white; padding: 12px 25px; text-decoration: none; border-radius: 25px; display: inline-block; font-weight: bold; margin: 10px 5px; }}
         .footer {{ text-align: center; font-size: 12px; color: #666; line-height: 1.4; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; }}
     </style>
 </head>
 <body>
     <div class="header">
-        <h1 style="margin: 0; font-size: 28px;">🔔 Nouvelles Activités LinkedIn</h1>
-        <p style="margin: 10px 0 0 0; opacity: 0.9; font-size: 16px;">Rapport groupé de veille</p>
+        <h1 style="margin: 0; font-size: 28px;">🔔 Nouveaux Posts LinkedIn</h1>
+        <p style="margin: 10px 0 0 0; opacity: 0.9; font-size: 16px;">Rapport de surveillance</p>
     </div>
     
     <div class="stats">
         <h2 style="color: #0077b5; margin: 0 0 10px 0;">📊 Résumé</h2>
-        <p style="margin: 5px; font-size: 18px;"><strong>{post_count}</strong> nouveau{'x' if post_count > 1 else ''} post{'s' if post_count > 1 else ''} de <strong>{profiles_count}</strong> profile{'s' if profiles_count > 1 else ''}</p>
+        <p style="margin: 5px; font-size: 18px;"><strong>{post_count}</strong> nouveau post{"s" if post_count > 1 else ""} de <strong>{profiles_count}</strong> profile{"s" if profiles_count > 1 else ""}</p>
         <p style="margin: 5px; color: #666;">Détection: {datetime.now().strftime('%d/%m/%Y à %H:%M UTC')}</p>
     </div>
 """
@@ -530,7 +469,7 @@ Configuration: Seules les nouvelles publications sont surveillées (pas les like
         <h2 style="color: #0077b5; margin-top: 0; display: flex; align-items: center;">
             <span style="margin-right: 10px;">👤</span> {profile_name}
             <span style="background: #0077b5; color: white; padding: 4px 12px; border-radius: 15px; font-size: 12px; margin-left: auto;">
-                {len(profile_posts)} post{'s' if len(profile_posts) > 1 else ''}
+                {len(profile_posts)} post{"s" if len(profile_posts) > 1 else ""}
             </span>
         </h2>
 """
@@ -637,7 +576,7 @@ class ContentAnalyzer:
 
 
 class LinkedInMonitor:
-    """Agent principal de monitoring LinkedIn - Version améliorée"""
+    """Agent principal de monitoring LinkedIn - Version optimisée"""
     
     def __init__(self, csv_file: str, email_config: Dict[str, str]):
         self.csv_file = csv_file
@@ -671,7 +610,7 @@ class LinkedInMonitor:
         }
     
     def load_profiles(self) -> List[ProfileData]:
-        """Chargement des profils depuis CSV (code existant)"""
+        """Chargement des profils depuis CSV"""
         try:
             if not os.path.exists(self.csv_file):
                 print(f"❌ Fichier CSV non trouvé: {self.csv_file}")
@@ -705,7 +644,7 @@ class LinkedInMonitor:
             return self._create_default_profiles()
     
     def _parse_row(self, row: Dict[str, Any], line_num: int) -> Optional[ProfileData]:
-        """Parse une ligne CSV en ProfileData (code existant)"""
+        """Parse une ligne CSV en ProfileData"""
         try:
             url = str(row.get('URL', '')).strip()
             name = str(row.get('Name', '')).strip()
@@ -729,15 +668,15 @@ class LinkedInMonitor:
             return None
     
     def _is_valid_linkedin_url(self, url: str) -> bool:
-        """Validation d'URL LinkedIn (code existant)"""
+        """Validation d'URL LinkedIn"""
         patterns = [
-            r'^https://www\.linkedin\.com/company/[^/]+/?(?:posts/?)?$',
-            r'^https://www\.linkedin\.com/in/[^/]+/?$'
+            r'^https://www\.linkedin\.com/company/[^/]+/?(?:posts/?)?,
+            r'^https://www\.linkedin\.com/in/[^/]+/?
         ]
         return any(re.match(pattern, url) for pattern in patterns)
     
     def _create_default_profiles(self) -> List[ProfileData]:
-        """Création de profils par défaut (code existant)"""
+        """Création de profils par défaut"""
         defaults = [
             ProfileData("https://www.linkedin.com/company/microsoft/posts/", "Microsoft"),
             ProfileData("https://www.linkedin.com/company/tesla-motors/posts/", "Tesla"), 
@@ -778,7 +717,7 @@ class LinkedInMonitor:
             return None
     
     def _optimize_url(self, url: str) -> str:
-        """Optimise l'URL pour récupérer les posts (code existant)"""
+        """Optimise l'URL pour récupérer les posts"""
         if '/company/' in url and not url.endswith('/posts/'):
             if not url.endswith('/'):
                 url += '/'
@@ -787,7 +726,7 @@ class LinkedInMonitor:
         return url
     
     def _make_request(self, url: str) -> Optional[requests.Response]:
-        """Requête HTTP avec retry (code existant)"""
+        """Requête HTTP avec retry"""
         for attempt in range(3):
             try:
                 response = self.session.get(url, timeout=30)
@@ -804,7 +743,7 @@ class LinkedInMonitor:
         return None
     
     def save_profiles(self, profiles: List[ProfileData]) -> bool:
-        """Sauvegarde des profils en CSV (code existant)"""
+        """Sauvegarde des profils en CSV"""
         try:
             fieldnames = ['URL', 'Name', 'Last_Post_ID', 'Error_Count']
             
@@ -822,10 +761,10 @@ class LinkedInMonitor:
             return False
     
     def run_monitoring(self) -> bool:
-        """Cycle principal de monitoring avec notification groupée"""
+        """Cycle principal de monitoring avec notification groupée conditionnelle"""
         try:
             print("=" * 80)
-            print(f"🚀 LINKEDIN MONITORING AMÉLIORÉ - {datetime.now()}")
+            print(f"🚀 LINKEDIN MONITORING OPTIMISÉ - {datetime.now()}")
             print("=" * 80)
             
             # Chargement des profils
@@ -863,7 +802,7 @@ class LinkedInMonitor:
                             if new_posts:
                                 self.all_new_posts.extend(new_posts)
                                 self.stats['new_posts'] += len(new_posts)
-                                print(f"📝 {len(new_posts)} nouveau{'x' if len(new_posts) > 1 else ''} post{'s' if len(new_posts) > 1 else ''} collecté{'s' if len(new_posts) > 1 else ''}")
+                                print(f"📝 {len(new_posts)} nouveau post{'s' if len(new_posts) > 1 else ''} collecté{'s' if len(new_posts) > 1 else ''}")
                             
                             # Mise à jour du hash
                             profile.last_post_id = current_hash
@@ -888,7 +827,7 @@ class LinkedInMonitor:
             
             # Envoi de la notification groupée UNIQUEMENT si nouveaux posts
             if self.all_new_posts:
-                print(f"\n📧 Envoi notification pour {len(self.all_new_posts)} nouveau{'x' if len(self.all_new_posts) > 1 else ''} post{'s' if len(self.all_new_posts) > 1 else ''} publié{'s' if len(self.all_new_posts) > 1 else ''}...")
+                print(f"\n📧 Envoi notification pour {len(self.all_new_posts)} nouveau post{'s' if len(self.all_new_posts) > 1 else ''} publié{'s' if len(self.all_new_posts) > 1 else ''}...")
                 if self.notifier.send_grouped_notification(self.all_new_posts):
                     print("✅ Notification groupée envoyée avec succès")
                 else:
@@ -936,7 +875,7 @@ class LinkedInMonitor:
 
 
 def validate_environment() -> Dict[str, str]:
-    """Validation de l'environnement (code existant)"""
+    """Validation de l'environnement"""
     print("🔧 Validation de l'environnement...")
     
     required_vars = {
@@ -972,7 +911,7 @@ def main():
     """Point d'entrée principal"""
     try:
         print("🎯" + "=" * 78 + "🎯")
-        print("🤖 LINKEDIN MONITORING AGENT - VERSION AMÉLIORÉE")
+        print("🤖 LINKEDIN MONITORING AGENT - VERSION OPTIMISÉE")
         print("🔥 Nouvelles fonctionnalités:")
         print("   • 🎯 Détection UNIQUEMENT des nouveaux posts publiés")
         print("   • 🚫 Exclusion des likes, commentaires et autres activités") 
@@ -984,7 +923,7 @@ def main():
         # Validation
         email_config = validate_environment()
         
-        # Monitoring amélioré
+        # Monitoring optimisé
         monitor = LinkedInMonitor("linkedin_urls.csv", email_config)
         success = monitor.run_monitoring()
         
@@ -992,7 +931,7 @@ def main():
         if success:
             print("🎉 MONITORING TERMINÉ AVEC SUCCÈS")
             if monitor.all_new_posts:
-                print(f"🚀 {len(monitor.all_new_posts)} nouveau{'x' if len(monitor.all_new_posts) > 1 else ''} post{'s' if len(monitor.all_new_posts) > 1 else ''} publié{'s' if len(monitor.all_new_posts) > 1 else ''} détecté{'s' if len(monitor.all_new_posts) > 1 else ''} et notifié{'s' if len(monitor.all_new_posts) > 1 else ''}")
+                print(f"🚀 {len(monitor.all_new_posts)} nouveau post{'s' if len(monitor.all_new_posts) > 1 else ''} publié{'s' if len(monitor.all_new_posts) > 1 else ''} détecté{'s' if len(monitor.all_new_posts) > 1 else ''} et notifié{'s' if len(monitor.all_new_posts) > 1 else ''}")
             else:
                 print("📭 Aucun nouveau post publié - Surveillance continue active")
             sys.exit(0)
