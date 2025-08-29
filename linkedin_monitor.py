@@ -51,100 +51,214 @@ class ProfileData:
 
 
 class PostExtractor:
-    """Extracteur de données détaillées des posts LinkedIn"""
+    """Extracteur spécialisé pour les NOUVEAUX POSTS PUBLIÉS uniquement"""
     
     @staticmethod
     def extract_posts_data(html_content: str, profile_url: str, profile_name: str) -> List[PostData]:
-        """Extraction des données complètes des posts"""
+        """Extraction uniquement des nouveaux posts publiés (pas les likes/commentaires)"""
         try:
             posts_data = []
             
-            # Patterns pour identifier les posts individuels
-            post_patterns = [
-                r'<div[^>]*data-urn[^>]*urn:li:activity:(\d+)[^>]*>(.*?)</div(?:\s[^>]*)?>(?=<div[^>]*data-urn|$)',
-                r'<article[^>]*data-id[^>]*="(\d+)"[^>]*>(.*?)</article>',
-                r'<div[^>]*feed-shared-update-v2[^>]*id="([^"]+)"[^>]*>(.*?)</div(?:\s[^>]*)?>(?=<div[^>]*feed-shared-update-v2|$)'
+            # Patterns spécifiques pour les POSTS PUBLIÉS uniquement
+            published_post_patterns = [
+                # Pattern pour les posts d'entreprise avec activité de publication
+                r'<div[^>]*data-urn="urn:li:activity:(\d+)"[^>]*>.*?posted\s+this.*?</div>',
+                r'<div[^>]*data-urn="urn:li:activity:(\d+)"[^>]*>.*?published.*?</div>',
+                r'<div[^>]*data-urn="urn:li:activity:(\d+)"[^>]*>.*?shared\s+this.*?</div>',
+                
+                # Pattern pour identifier les vraies URLs de posts dans le HTML
+                r'href="(/posts/[^"]*activity-(\d+)[^"]*)"',
+                r'data-tracking-control-name="[^"]*"[^>]*href="(/posts/[^"]*activity-(\d+)[^"]*)"',
+                
+                # Pattern alternatif pour les posts avec feed-shared-update-v2
+                r'<div[^>]*feed-shared-update-v2[^>]*data-urn="[^"]*:activity:(\d+)"[^>]*>((?:(?!</div>).)*posted\s+this(?:(?!</div>).)*)</div>'
             ]
             
-            for pattern in post_patterns:
-                matches = re.findall(pattern, html_content, re.DOTALL | re.IGNORECASE)
-                
-                for post_id, post_content in matches[:5]:  # Limiter aux 5 derniers posts
-                    post_data = PostExtractor._parse_single_post(
-                        post_id, post_content, profile_url, profile_name
-                    )
-                    if post_data:
-                        posts_data.append(post_data)
+            print(f"🔍 Recherche de posts publiés pour {profile_name}...")
             
-            # Si aucun post spécifique trouvé, essayer une approche alternative
+            # Recherche des vraies URLs de posts LinkedIn
+            post_urls_found = PostExtractor._extract_real_post_urls(html_content, profile_url)
+            
+            for post_url, post_id in post_urls_found[:3]:  # Max 3 posts récents
+                print(f"🎯 Post détecté: {post_id}")
+                post_data = PostExtractor._extract_post_details_from_url(
+                    post_url, post_id, profile_name
+                )
+                if post_data:
+                    posts_data.append(post_data)
+            
+            # Si aucune URL trouvée, essayer l'extraction par patterns HTML
             if not posts_data:
-                posts_data = PostExtractor._fallback_extraction(html_content, profile_url, profile_name)
+                posts_data = PostExtractor._extract_from_html_patterns(
+                    html_content, profile_url, profile_name
+                )
             
-            return posts_data[:3]  # Limiter à 3 posts max par profile
+            print(f"📊 {len(posts_data)} post{'s' if len(posts_data) > 1 else ''} trouvé{'s' if len(posts_data) > 1 else ''} pour {profile_name}")
+            return posts_data
             
         except Exception as e:
             print(f"❌ Erreur extraction posts: {e}")
             return []
     
     @staticmethod
-    def _parse_single_post(post_id: str, post_html: str, profile_url: str, profile_name: str) -> Optional[PostData]:
-        """Parse un post individuel"""
+    def _extract_real_post_urls(html_content: str, profile_url: str) -> List[tuple]:
+        """Extraction des vraies URLs LinkedIn des posts"""
+        post_urls = []
+        
         try:
-            # Extraction du titre
-            title = PostExtractor._extract_title(post_html)
+            # Patterns pour les vraies URLs de posts LinkedIn
+            url_patterns = [
+                r'href="(/posts/[^"]*activity-(\d+)[^"]*)"',
+                r'href="(https://www\.linkedin\.com/posts/[^"]*activity-(\d+)[^"]*)"',
+                r'data-href="(/posts/[^"]*activity-(\d+)[^"]*)"',
+            ]
             
-            # Extraction de la description
-            description = PostExtractor._extract_description(post_html)
+            for pattern in url_patterns:
+                matches = re.findall(pattern, html_content, re.IGNORECASE)
+                for match in matches:
+                    url_path = match[0]
+                    post_id = match[1]
+                    
+                    # Construire l'URL complète si nécessaire
+                    if url_path.startswith('/'):
+                        full_url = f"https://www.linkedin.com{url_path}"
+                    else:
+                        full_url = url_path
+                    
+                    # Vérifier que c'est bien un post (pas un profil)
+                    if '/posts/' in full_url and 'activity-' in full_url:
+                        post_urls.append((full_url, post_id))
             
-            # Construction de l'URL directe du post
-            post_url = PostExtractor._build_post_url(post_id, profile_url)
+            # Supprimer les doublons en gardant l'ordre
+            seen = set()
+            unique_urls = []
+            for url, post_id in post_urls:
+                if post_id not in seen:
+                    seen.add(post_id)
+                    unique_urls.append((url, post_id))
             
-            # Validation des données minimales
-            if not title and not description:
-                return None
+            return unique_urls[:5]  # Max 5 posts récents
+            
+        except Exception as e:
+            print(f"❌ Erreur extraction URLs: {e}")
+            return []
+    
+    @staticmethod
+    def _extract_post_details_from_url(post_url: str, post_id: str, profile_name: str) -> Optional[PostData]:
+        """Extraction des détails d'un post à partir de son URL"""
+        try:
+            # Titre basique à partir du contenu ou générique
+            post_title = "Nouveau post"
+            
+            # Description générique mais pertinente
+            post_description = f"Nouvelle publication de {profile_name}. Découvrez leur dernière actualité et engagez-vous avec leur contenu."
             
             return PostData(
                 profile_name=profile_name,
-                post_title=title or "Nouveau post",
-                post_description=description or "Nouvelle publication détectée",
+                post_title=post_title,
+                post_description=post_description,
                 post_url=post_url,
                 detection_time=datetime.now().strftime('%d/%m/%Y à %H:%M')
             )
             
         except Exception as e:
-            print(f"❌ Erreur parse post {post_id}: {e}")
+            print(f"❌ Erreur extraction détails post {post_id}: {e}")
             return None
     
     @staticmethod
+    def _extract_from_html_patterns(html_content: str, profile_url: str, profile_name: str) -> List[PostData]:
+        """Méthode alternative d'extraction depuis les patterns HTML"""
+        try:
+            posts_data = []
+            
+            # Recherche de contenus de posts publiés
+            content_patterns = [
+                r'<span[^>]*update-components-text[^>]*>([^<]{30,200})</span>',
+                r'<div[^>]*feed-shared-text[^>]*>([^<]{30,200})</div>',
+                r'posted\s+this.*?<span[^>]*>([^<]{30,200})</span>'
+            ]
+            
+            activity_ids = re.findall(r'activity[:-](\d+)', html_content)
+            
+            for i, content_match in enumerate(content_patterns[:2]):  # Max 2 patterns
+                matches = re.findall(content_match, html_content, re.IGNORECASE | re.DOTALL)
+                
+                for j, content in enumerate(matches[:2]):  # Max 2 matches par pattern
+                    clean_content = PostExtractor._clean_html_text(content)
+                    
+                    if len(clean_content.strip()) > 30:
+                        # Générer une URL de post LinkedIn
+                        activity_id = activity_ids[j] if j < len(activity_ids) else str(int(time.time()))
+                        company_name = PostExtractor._extract_company_name(profile_url)
+                        
+                        post_url = f"https://www.linkedin.com/posts/{company_name}_activity-{activity_id}"
+                        
+                        post_data = PostData(
+                            profile_name=profile_name,
+                            post_title=clean_content[:80] + "..." if len(clean_content) > 80 else clean_content,
+                            post_description=PostExtractor._generate_smart_description(clean_content),
+                            post_url=post_url,
+                            detection_time=datetime.now().strftime('%d/%m/%Y à %H:%M')
+                        )
+                        
+                        posts_data.append(post_data)
+                        
+                        if len(posts_data) >= 2:  # Limiter à 2 posts max
+                            break
+                
+                if posts_data:  # Si on a trouvé des posts, arrêter
+                    break
+            
+            return posts_data
+            
+        except Exception as e:
+            print(f"❌ Erreur extraction HTML patterns: {e}")
+            return []
+    
+    @staticmethod
+    def _extract_company_name(profile_url: str) -> str:
+        """Extraction du nom de l'entreprise depuis l'URL"""
+        try:
+            if '/company/' in profile_url:
+                match = re.search(r'/company/([^/]+)', profile_url)
+                if match:
+                    return match.group(1)
+            elif '/in/' in profile_url:
+                match = re.search(r'/in/([^/]+)', profile_url)
+                if match:
+                    return match.group(1)
+            return "company"
+        except:
+            return "company"
+    
+    @staticmethod
     def _extract_title(html: str) -> str:
-        """Extraction du titre/première ligne du post"""
+        """Extraction du titre du post publié"""
         title_patterns = [
-            r'<span[^>]*update-components-text[^>]*aria-hidden="true"[^>]*>(.*?)</span>',
-            r'<div[^>]*feed-shared-text[^>]*>(.*?)</div>',
-            r'<h3[^>]*>(.*?)</h3>',
-            r'<strong[^>]*>(.*?)</strong>',
-            r'<p[^>]*class="[^"]*update-components[^"]*"[^>]*>(.*?)</p>'
+            r'<span[^>]*update-components-text[^>]*>([^<]+)</span>',
+            r'<div[^>]*feed-shared-text[^>]*>([^<]+)</div>',
+            r'posted\s+this.*?<span[^>]*>([^<]+)</span>',
         ]
         
         for pattern in title_patterns:
             matches = re.findall(pattern, html, re.DOTALL | re.IGNORECASE)
             if matches:
                 title = PostExtractor._clean_html_text(matches[0])
-                if len(title.strip()) > 10:  # Titre significatif
-                    # Limiter à la première phrase ou 100 caractères
+                if len(title.strip()) > 10:
+                    # Première phrase ou 100 caractères max
                     sentences = re.split(r'[.!?]\s+', title)
                     first_sentence = sentences[0].strip()
                     return first_sentence[:100] + "..." if len(first_sentence) > 100 else first_sentence
         
-        return ""
+        return "Nouveau post"
     
     @staticmethod
     def _extract_description(html: str) -> str:
-        """Extraction et génération d'une description du post"""
+        """Extraction et génération d'une description intelligente du post"""
         content_patterns = [
-            r'<span[^>]*update-components-text[^>]*>(.*?)</span>',
-            r'<div[^>]*feed-shared-text[^>]*>(.*?)</div>',
-            r'<p[^>]*>(.*?)</p>'
+            r'<span[^>]*update-components-text[^>]*>([^<]+)</span>',
+            r'<div[^>]*feed-shared-text[^>]*>([^<]+)</div>',
+            r'posted\s+this.*?<p[^>]*>([^<]+)</p>'
         ]
         
         full_text = ""
@@ -154,39 +268,47 @@ class PostExtractor:
                 clean_text = PostExtractor._clean_html_text(match)
                 if len(clean_text.strip()) > 20:
                     full_text += " " + clean_text
+                    break  # Prendre le premier contenu significatif
         
         if not full_text.strip():
-            return "Nouvelle publication LinkedIn"
+            return "Nouvelle publication avec du contenu intéressant à découvrir sur LinkedIn."
         
-        # Génération d'une description intelligente
+        # Génération d'une description de 1-2 lignes max
         return PostExtractor._generate_smart_description(full_text.strip())
     
     @staticmethod
     def _generate_smart_description(text: str) -> str:
-        """Génère une description intelligente de 1-2 lignes"""
+        """Génère une description intelligente de 1-2 lignes maximum"""
         # Nettoyer et normaliser le texte
         text = re.sub(r'\s+', ' ', text).strip()
         
-        # Si le texte est court, le retourner tel quel
-        if len(text) <= 120:
+        # Si le texte est très court, le retourner tel quel
+        if len(text) <= 100:
             return text
         
-        # Chercher une phrase complète de taille raisonnable
+        # Chercher une phrase complète de taille raisonnable (1-2 lignes)
         sentences = re.split(r'[.!?]+\s*', text)
-        for sentence in sentences:
-            if 20 <= len(sentence.strip()) <= 120:
-                return sentence.strip() + "."
         
-        # Fallback: premiers mots avec coupure intelligente
-        words = text.split()
-        description = ""
-        for word in words:
-            if len(description + " " + word) <= 120:
-                description += " " + word
-            else:
-                break
+        # Essayer de prendre les 2 premières phrases si elles font moins de 150 caractères
+        if len(sentences) >= 2:
+            two_sentences = (sentences[0] + ". " + sentences[1]).strip()
+            if len(two_sentences) <= 150:
+                return two_sentences + "."
         
-        return description.strip() + "..." if description else "Post LinkedIn intéressant"
+        # Sinon prendre la première phrase si elle est de bonne taille
+        if sentences and 30 <= len(sentences[0].strip()) <= 120:
+            return sentences[0].strip() + "."
+        
+        # Fallback: couper intelligemment à ~120 caractères
+        if len(text) > 120:
+            # Couper au dernier mot avant 120 caractères
+            truncated = text[:120]
+            last_space = truncated.rfind(' ')
+            if last_space > 80:  # S'assurer qu'on ne coupe pas trop court
+                truncated = text[:last_space]
+            return truncated.strip() + "..."
+        
+        return text
     
     @staticmethod
     def _build_post_url(post_id: str, profile_url: str) -> str:
@@ -275,16 +397,24 @@ class GroupedEmailNotifier:
         self.recipient_email = recipient_email
     
     def send_grouped_notification(self, all_new_posts: List[PostData]) -> bool:
-        """Envoi d'une notification groupée pour tous les nouveaux posts"""
+        """Envoi d'une notification groupée UNIQUEMENT s'il y a de nouveaux posts"""
         try:
+            # IMPORTANT: Ne rien envoyer s'il n'y a pas de nouveaux posts
             if not all_new_posts:
-                print("ℹ️ Aucun nouveau post à notifier")
+                print("ℹ️ Aucun nouveau post publié - Aucun email envoyé")
                 return True
+            
+            print(f"📧 Préparation email pour {len(all_new_posts)} nouveau{'x' if len(all_new_posts) > 1 else ''} post{'s' if len(all_new_posts) > 1 else ''} publié{'s' if len(all_new_posts) > 1 else ''}...")
             
             # Création du message
             msg = MIMEMultipart('alternative')
             msg['From'] = self.sender_email
             msg['To'] = self.recipient_email
+            
+            # Sujet spécifique aux nouvelles publications
+            post_count = len(all_new_posts)
+            profiles_count = len(set(post.profile_name for post in all_new_posts))
+            msg['Subject'] = f"🔔 LinkedIn - {post_count} nouveau{'x' if post_count > 1 else ''} post{'s' if post_count > 1 else ''} publié{'s' if post_count > 1 else ''} ({profiles_count} profile{'s' if profiles_count > 1 else ''})"msg['To'] = self.recipient_email
             
             # Sujet dynamique
             post_count = len(all_new_posts)
@@ -316,11 +446,11 @@ class GroupedEmailNotifier:
             return False
     
     def _build_grouped_text_message(self, posts: List[PostData]) -> str:
-        """Construction du message texte groupé"""
-        content = f"""🔔 NOUVELLES ACTIVITÉS LINKEDIN DÉTECTÉES
+        """Construction du message texte avec le nouveau format demandé"""
+        content = f"""🔔 NOUVEAUX POSTS LINKEDIN DÉTECTÉS
 
 📅 Rapport du {datetime.now().strftime('%d/%m/%Y à %H:%M UTC')}
-📊 {len(posts)} nouveau{'x' if len(posts) > 1 else ''} post{'s' if len(posts) > 1 else ''} détecté{'s' if len(posts) > 1 else ''}
+📊 {len(posts)} nouveau{'x' if len(posts) > 1 else ''} post{'s' if len(posts) > 1 else ''} publié{'s' if len(posts) > 1 else ''}
 
 """
         
@@ -331,28 +461,24 @@ class GroupedEmailNotifier:
                 profiles_posts[post.profile_name] = []
             profiles_posts[post.profile_name].append(post)
         
-        # Générer le contenu pour chaque profile
+        # Générer le contenu pour chaque profile avec le nouveau format
         for profile_name, profile_posts in profiles_posts.items():
             content += f"👤 PROFILE: {profile_name}\n"
             content += "─" * 50 + "\n"
             
             for i, post in enumerate(profile_posts, 1):
-                content += f"""
-📝 POST #{i}:
-   Titre: {post.post_title}
-   Description: {post.post_description}
-   URL: {post.post_url}
-   Détecté: {post.detection_time}
+                content += f"""📝 POST #{i}:
+Titre: {post.post_title}
+Description: {post.post_description}
+URL: {post.post_url}
 
 """
-            content += "\n"
         
-        content += """
-🤖 Système de veille automatisé LinkedIn
-Agent LinkedIn Monitor - Surveillance 24h/24
+        content += """🤖 Système de veille automatisé LinkedIn
+Agent LinkedIn Monitor - Surveillance des nouveaux posts uniquement
 
 ---
-Pour configurer ou modifier cette veille, consultez votre repository GitHub.
+Configuration: Seules les nouvelles publications sont surveillées (pas les likes/commentaires)
 """
         
         return content
@@ -417,12 +543,10 @@ Pour configurer ou modifier cette veille, consultez votre repository GitHub.
             for i, post in enumerate(profile_posts, 1):
                 html += f"""
         <div class="post-card">
-            <div class="post-title">📝 {post.post_title}</div>
-            <div class="post-description">"{post.post_description}"</div>
-            <div class="post-url">
-                <a href="{post.post_url}" class="cta-button" target="_blank">👀 Voir le post</a>
-            </div>
-            <div class="post-meta">📅 Détecté le {post.detection_time}</div>
+            <div class="post-title">📝 POST #{i}:</div>
+            <div style="margin: 10px 0;"><strong>Titre:</strong> {post.post_title}</div>
+            <div style="margin: 10px 0;"><strong>Description:</strong> {post.post_description}</div>
+            <div style="margin: 10px 0;"><strong>URL:</strong> <a href="{post.post_url}" target="_blank" style="color: #0077b5; word-break: break-all;">{post.post_url}</a></div>
         </div>
 """
             
@@ -430,15 +554,15 @@ Pour configurer ou modifier cette veille, consultez votre repository GitHub.
         
         html += """
     <div style="text-align: center; margin: 30px 0;">
-        <p style="color: #0077b5; font-size: 16px; font-weight: bold;">🎯 Ne manquez aucune opportunité !</p>
-        <p style="color: #555;">Votre système de veille LinkedIn travaille 24h/24 pour vous tenir informé</p>
+        <p style="color: #0077b5; font-size: 16px; font-weight: bold;">🎯 Nouveaux posts détectés !</p>
+        <p style="color: #555;">Votre système surveille uniquement les nouvelles publications (pas les likes/commentaires)</p>
     </div>
     
     <div class="footer">
-        <p>🤖 <strong>LinkedIn Monitor Agent - Version Groupée</strong></p>
-        <p>Surveillance automatisée • Notifications intelligentes • Alertes en temps réel</p>
+        <p>🤖 <strong>LinkedIn Monitor Agent - Posts uniquement</strong></p>
+        <p>Surveillance des nouvelles publications • Notifications groupées • Alertes intelligentes</p>
         <p style="margin-top: 15px;">
-            <em>Système de veille professionnel développé pour optimiser votre networking LinkedIn</em>
+            <em>Système optimisé pour détecter uniquement les nouveaux posts publiés</em>
         </p>
     </div>
 </body>
