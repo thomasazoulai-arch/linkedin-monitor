@@ -972,8 +972,8 @@ class OptimizedLinkedInMonitor:
     def _is_valid_linkedin_url(self, url: str) -> bool:
         """Validation d'URL LinkedIn"""
         patterns = [
-            r'^https://www\.linkedin\.com/company/[^/]+/?(?:posts/?)?,
-            r'^https://www\.linkedin\.com/in/[^/]+/?
+            r'^https://www\.linkedin\.com/company/[^/]+/?(?:posts/?)?',
+            r'^https://www\.linkedin\.com/in/[^/]+/?'
         ]
         return any(re.match(pattern, url) for pattern in patterns)
     
