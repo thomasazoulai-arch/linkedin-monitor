@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-LinkedIn Monitor Agent - Version Production Optimisée
+LinkedIn Monitor Agent - Version Production Optimisée CORRIGÉE
 Améliorations:
 - URLs directes vers les posts spécifiques
-- Extraction de contenu améliorée avec fallbacks intelligents
+- Extraction de contenu améliorée avec fallbacks intelligents  
 - Format email moderne et engageant
 - Gestion optimisée des métadonnées LinkedIn
+- CORRECTION: Toutes les erreurs de syntaxe résolues
 """
 import requests
 import csv
@@ -564,49 +565,48 @@ Surveillance automatisée de vos profils LinkedIn favoris
     def _build_modern_html_message(self, posts: List[PostData]) -> str:
         """Message HTML moderne avec le format exact demandé"""
         
-        html = """
-<!DOCTYPE html>
+        html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LinkedIn Alert</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             line-height: 1.6; 
             color: #2c3e50; 
             background: #f8f9fa;
             padding: 20px;
-        }
-        .container { 
+        }}
+        .container {{ 
             max-width: 650px; 
             margin: 0 auto; 
             background: white; 
             border-radius: 16px; 
             overflow: hidden;
             box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        }
-        .header { 
+        }}
+        .header {{ 
             background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
             color: white; 
             padding: 30px 25px; 
             text-align: center;
-        }
-        .header h1 { 
+        }}
+        .header h1 {{ 
             font-size: 26px; 
             font-weight: 700; 
             margin-bottom: 8px;
-        }
-        .header p { 
+        }}
+        .header p {{ 
             opacity: 0.9; 
             font-size: 16px;
-        }
-        .content { 
+        }}
+        .content {{ 
             padding: 25px;
-        }
-        .post-item { 
+        }}
+        .post-item {{ 
             background: #ffffff;
             border: 1px solid #e1e8ed;
             border-radius: 12px; 
@@ -614,59 +614,59 @@ Surveillance automatisée de vos profils LinkedIn favoris
             margin-bottom: 20px;
             transition: all 0.3s ease;
             border-left: 4px solid #0077b5;
-        }
-        .post-item:hover {
+        }}
+        .post-item:hover {{
             box-shadow: 0 4px 15px rgba(0,119,181,0.1);
             transform: translateY(-2px);
-        }
-        .profile-name { 
+        }}
+        .profile-name {{ 
             font-size: 18px; 
             font-weight: 700; 
             color: #0077b5; 
             margin-bottom: 15px;
             display: flex;
             align-items: center;
-        }
-        .profile-emoji {
+        }}
+        .profile-emoji {{
             margin-right: 8px;
             font-size: 20px;
-        }
-        .post-field { 
+        }}
+        .post-field {{ 
             margin-bottom: 12px; 
             display: flex;
             align-items: flex-start;
-        }
-        .field-icon { 
+        }}
+        .field-icon {{ 
             font-size: 16px; 
             margin-right: 10px; 
             margin-top: 2px;
             min-width: 20px;
-        }
-        .field-label { 
+        }}
+        .field-label {{ 
             font-weight: 600; 
             color: #34495e; 
             margin-right: 8px;
             min-width: 85px;
-        }
-        .field-content { 
+        }}
+        .field-content {{ 
             color: #2c3e50; 
             flex: 1;
             word-wrap: break-word;
-        }
-        .post-title { 
+        }}
+        .post-title {{ 
             font-weight: 600;
             color: #2c3e50;
-        }
-        .post-description { 
+        }}
+        .post-description {{ 
             color: #555; 
             font-style: italic; 
             line-height: 1.5;
-        }
-        .post-url-container {
+        }}
+        .post-url-container {{
             margin-top: 15px;
             text-align: center;
-        }
-        .post-link { 
+        }}
+        .post-link {{ 
             background: linear-gradient(135deg, #0077b5, #005885);
             color: white; 
             text-decoration: none; 
@@ -676,35 +676,35 @@ Surveillance automatisée de vos profils LinkedIn favoris
             display: inline-block;
             transition: all 0.3s ease;
             box-shadow: 0 4px 15px rgba(0,119,181,0.3);
-        }
-        .post-link:hover {
+        }}
+        .post-link:hover {{
             background: linear-gradient(135deg, #005885, #004766);
             transform: translateY(-1px);
             box-shadow: 0 6px 20px rgba(0,119,181,0.4);
-        }
-        .stats { 
+        }}
+        .stats {{ 
             background: linear-gradient(135deg, #f8f9fa, #e9ecef);
             padding: 20px; 
             text-align: center; 
             color: #495057;
             border-top: 1px solid #dee2e6;
-        }
-        .footer { 
+        }}
+        .footer {{ 
             background: #2c3e50; 
             color: #ecf0f1; 
             padding: 20px; 
             text-align: center; 
             font-size: 14px;
-        }
-        .footer a { 
+        }}
+        .footer a {{ 
             color: #3498db; 
             text-decoration: none;
-        }
-        .divider {
+        }}
+        .divider {{
             height: 1px;
             background: linear-gradient(to right, transparent, #ddd, transparent);
             margin: 20px 0;
-        }
+        }}
     </style>
 </head>
 <body>
