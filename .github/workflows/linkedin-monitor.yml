@@ -11,6 +11,11 @@ on:
         required: false
         default: 'false'
 
+# CORRECTION 1: Ajout des permissions nécessaires
+permissions:
+  contents: write  # Permission d'écriture sur le repository
+  actions: read    # Permission de lecture des actions
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -20,8 +25,9 @@ jobs:
     - name: 📥 Checkout repository
       uses: actions/checkout@v4
       with:
+        # CORRECTION 2: Utilisation d'un token avec permissions étendues
         token: ${{ secrets.GITHUB_TOKEN }}
-        fetch-depth: 1
+        fetch-depth: 0  # Récupérer tout l'historique pour éviter les conflits
     
     - name: 🐍 Setup Python
       uses: actions/setup-python@v4
@@ -56,34 +62,91 @@ jobs:
         echo "🚀 Lancement de l'agent LinkedIn..."
         python linkedin_monitor.py
     
+    # CORRECTION 3: Amélioration de la gestion Git avec vérifications
     - name: 💾 Commit and push changes
       run: |
-        # Configuration Git
+        # Configuration Git avec informations détaillées
         git config --local user.email "action@github.com"
         git config --local user.name "LinkedIn Monitor Agent"
         
-        # Ajout des fichiers modifiés
+        # Vérification du statut Git
+        echo "📊 Statut Git avant modification:"
+        git status
+        
+        # Ajout des fichiers modifiés avec vérification
+        echo "📁 Ajout des fichiers modifiés..."
         git add linkedin_urls.csv
-        git add linkedin_urls.xlsx 2>/dev/null || true  # Ignore si inexistant
+        
+        # Ajout conditionnel du fichier Excel s'il existe
+        if [ -f "linkedin_urls.xlsx" ]; then
+          git add linkedin_urls.xlsx
+          echo "✅ Fichier Excel ajouté"
+        fi
+        
+        # Vérification des changements avant commit
+        echo "📊 Statut après ajout:"
+        git status
         
         # Commit seulement s'il y a des changements
         if git diff --staged --quiet; then
           echo "📝 Aucun changement à committer"
         else
-          git commit -m "🔄 Update LinkedIn monitoring data [$(date '+%Y-%m-%d %H:%M:%S')]"
-          git push
-          echo "✅ Changements sauvegardés"
+          echo "💾 Création du commit..."
+          
+          # CORRECTION 4: Gestion plus robuste des conflits
+          # Pull avant push pour éviter les conflits
+          git pull origin ${{ github.ref_name }} --rebase || echo "⚠️ Pas de changements distants"
+          
+          # Commit avec message détaillé
+          git commit -m "🔄 Update LinkedIn monitoring data [$(date '+%Y-%m-%d %H:%M:%S UTC')]
+          
+          📊 Résumé:
+          - Surveillance automatique LinkedIn
+          - Mise à jour des signatures de contenu
+          - Agent: GitHub Actions Bot
+          - Timestamp: $(date -u)"
+          
+          # Push avec gestion d'erreur améliorée
+          echo "🚀 Push vers GitHub..."
+          if git push origin ${{ github.ref_name }}; then
+            echo "✅ Changements sauvegardés avec succès"
+          else
+            echo "❌ Échec du push - Tentative de résolution..."
+            
+            # Tentative de résolution automatique
+            git pull origin ${{ github.ref_name }} --rebase
+            git push origin ${{ github.ref_name }}
+            
+            if [ $? -eq 0 ]; then
+              echo "✅ Push réussi après résolution"
+            else
+              echo "💥 Échec final du push"
+              exit 1
+            fi
+          fi
         fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
+    # CORRECTION 5: Ajout d'une étape de vérification finale
+    - name: 🔍 Verify repository state
+      run: |
+        echo "🔍 Vérification finale du repository:"
+        git log --oneline -3
+        echo "📊 Statut final:"
+        git status
+        echo "📁 Fichiers dans le repository:"
+        ls -la *.csv *.xlsx 2>/dev/null || echo "Aucun fichier de données"
+    
     - name: 📋 Summary
       run: |
         echo "=============================================="
-        echo "🏁 RÉSUMÉ DE L'EXÉCUTION"
+        echo "🏁 RÉSUMÉ DE L'EXÉCUTION CORRIGÉE"
         echo "=============================================="
         echo "📅 Date: $(date)"
         echo "🔧 Workflow: ${{ github.workflow }}"
         echo "🌿 Branch: ${{ github.ref_name }}"
+        echo "🔑 Permissions: contents:write activées"
         echo "✅ Agent LinkedIn exécuté avec succès"
+        echo "💾 Gestion Git améliorée"
         echo "=============================================="
