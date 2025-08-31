@@ -1,5 +1,26 @@
-# LinkedIn Monitor - Dépendances minimales et stables
-# Version corrigée pour éviter les conflits de versions
+# LinkedIn Monitor v4.0 - API Officielle
+# Dépendances pour l'intégration API LinkedIn
 
-# Seule dépendance réellement nécessaire
+# Requêtes HTTP optimisées
 requests==2.31.0
+
+# Support OAuth 2.0 et authentification
+requests-oauthlib==1.3.1
+
+# Parsing et manipulation JSON avancée
+jsonschema==4.19.0
+
+# Gestion des dates et timezones
+python-dateutil==2.8.2
+
+# Encodage et décodage robuste
+chardet==5.2.0
+
+# Support Excel pour export avancé (optionnel)
+openpyxl==3.1.2
+
+# Gestion des erreurs réseau
+urllib3==2.0.4
+
+# Validation et nettoyage des données
+validators==0.22.0
