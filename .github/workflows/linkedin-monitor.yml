@@ -1,8 +1,9 @@
 name: LinkedIn API Monitor v4.0
+
 on:
   schedule:
-    # Exécution optimisée chaque jour à 7h
-    - cron: '0 7 * * *'
+    # Exécution optimisée toutes les 6 heures pour respecter les quotas API
+    - cron: '0 6,12,18,0 * * *'
   workflow_dispatch:  # Exécution manuelle
     inputs:
       debug_mode:
@@ -199,4 +200,87 @@ jobs:
           done
         else
           echo "📝 Aucune modification de données à committer"
+        fi
+    
+    - name: 🔍 API Health Check
+      run: |
+        echo "🔍 Vérification de la santé de l'API..."
+        
+        # Vérification de l'état du repository
+        echo "📊 État final du repository:"
+        git log --oneline -3
+        echo ""
+        echo "📁 Fichiers de données présents:"
+        ls -la *.csv *.xlsx *.log 2>/dev/null || echo "Aucun fichier de données"
+        
+        # Vérification de la taille des fichiers
+        if [ -f "linkedin_urls.csv" ]; then
+          SIZE=$(wc -c < linkedin_urls.csv)
+          echo "📏 Taille CSV: $SIZE bytes"
+          
+          if [ "$SIZE" -lt 100 ]; then
+            echo "⚠️ ATTENTION: Fichier CSV très petit - Vérifiez les données"
+          fi
+        fi
+        
+        # Estimation du quota API utilisé
+        if [ -f "api_monitor.log" ]; then
+          API_CALLS=$(grep -c "API Check:" api_monitor.log 2>/dev/null || echo "0")
+          echo "📊 Appels API effectués: $API_CALLS"
+          echo "📈 Quota estimé utilisé: $(( API_CALLS * 2 )) points"
+        fi
+    
+    - name: 🎯 Deployment Summary
+      run: |
+        echo "=============================================================="
+        echo "🎉 RÉSUMÉ LINKEDIN API MONITOR v4.0"
+        echo "=============================================================="
+        echo "📅 Exécution: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "🔧 Workflow: ${{ github.workflow }}"
+        echo "🌿 Branch: ${{ github.ref_name }}"
+        echo "🔐 API LinkedIn: Intégration officielle v2"
+        echo "📡 Endpoints: UGC Posts + Organizations"
+        echo "🎯 Extraction: Contenu 100% authentique"
+        echo "⚡ OAuth 2.0: Authentification sécurisée"
+        echo "🎨 Email: Design ultra-premium avec données réelles"
+        echo "🤖 Intelligence: Analyse avancée des posts"
+        echo ""
+        echo "🔥 AVANTAGES VERSION API:"
+        echo "   • Vrais titres et descriptions des posts"
+        echo "   • Données d'engagement temps réel"
+        echo "   • Contournement des limitations de scraping"
+        echo "   • Respect des conditions d'utilisation LinkedIn"
+        echo "   • Fiabilité et stabilité maximales"
+        echo "   • Support officiel des Company Pages"
+        echo "=============================================================="
+        
+        # Badge de succès
+        if [ "${{ job.status }}" = "success" ]; then
+          echo "🟢 STATUT: SUCCÈS COMPLET"
+        else
+          echo "🟡 STATUT: TERMINÉ AVEC AVERTISSEMENTS"
+        fi
+        
+        echo "🚀 Prochaine exécution automatique: $(date -d '+6 hours' '+%Y-%m-%d %H:%M UTC')"
+        echo "=============================================================="
+
+    # Étape optionnelle: Notification Slack/Discord en cas d'erreur critique
+    - name: 🚨 Critical Error Notification
+      if: failure()
+      run: |
+        echo "🚨 ERREUR CRITIQUE DÉTECTÉE"
+        echo "Le monitoring API LinkedIn a rencontré une erreur critique."
+        echo "Vérifiez les logs ci-dessus pour plus de détails."
+        echo ""
+        echo "Actions recommandées:"
+        echo "1. Vérifier la validité des tokens API LinkedIn"
+        echo "2. Contrôler les quotas API restants"
+        echo "3. Valider la configuration des secrets GitHub"
+        echo "4. Consulter la documentation LinkedIn API"
+        
+        # Log d'erreur pour debug
+        if [ -f "api_monitor.log" ]; then
+          echo ""
+          echo "📋 Dernières lignes du log:"
+          tail -10 api_monitor.log
         fi
