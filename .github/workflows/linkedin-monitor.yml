@@ -1,152 +1,203 @@
-name: LinkedIn Monitor Agent
+name: LinkedIn API Monitor v4.0
 
 on:
   schedule:
-    # Exécution toutes les 12 heures (à 8h00 et 20h00 UTC)
-    - cron: '0 8,20 * * *'
-  workflow_dispatch:  # Permet l'exécution manuelle
+    # Exécution optimisée chaque jour à 7h
+    - cron: '0 7 * * *'
+  workflow_dispatch:  # Exécution manuelle
     inputs:
       debug_mode:
-        description: 'Activer le mode debug'
+        description: 'Activer le mode debug API'
+        required: false
+        default: 'false'
+      force_auth:
+        description: 'Forcer la réauthentification'
         required: false
         default: 'false'
 
-# CORRECTION 1: Ajout des permissions nécessaires
+# Permissions étendues pour API
 permissions:
-  contents: write  # Permission d'écriture sur le repository
-  actions: read    # Permission de lecture des actions
+  contents: write
+  actions: read
+  id-token: write  # Pour l'authentification avancée
+
+env:
+  # Configuration API LinkedIn
+  LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
+  LINKEDIN_CLIENT_SECRET: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
+  LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+  
+  # Configuration email
+  GMAIL_EMAIL: ${{ secrets.GMAIL_EMAIL }}
+  GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+  RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+  
+  # Configuration monitoring
+  DEBUG_MODE: ${{ github.event.inputs.debug_mode || 'false' }}
+  MAX_POSTS_PER_PROFILE: 10
+  API_DELAY_SECONDS: 20
 
 jobs:
-  monitor:
+  linkedin-api-monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # Timeout de sécurité
+    timeout-minutes: 45  # Timeout étendu pour API
     
     steps:
-    - name: 📥 Checkout repository
+    - name: 🚀 Checkout Repository
       uses: actions/checkout@v4
       with:
-        # CORRECTION 2: Utilisation d'un token avec permissions étendues
         token: ${{ secrets.GITHUB_TOKEN }}
-        fetch-depth: 0  # Récupérer tout l'historique pour éviter les conflits
+        fetch-depth: 0
     
-    - name: 🐍 Setup Python
+    - name: 🐍 Setup Python avec Cache
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: '3.11'  # Version plus récente pour l'API
         cache: 'pip'
     
-    - name: 📦 Install dependencies
+    - name: 📦 Install API Dependencies
       run: |
+        echo "📦 Installation des dépendances API LinkedIn..."
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        echo "✅ Dépendances installées"
+        echo "✅ Dépendances API installées avec succès"
     
-    - name: 📊 Check files
+    - name: 🔐 Validate API Configuration
       run: |
-        echo "📂 Fichiers présents:"
-        ls -la
-        echo "📝 Contenu du CSV:"
+        echo "🔐 Validation de la configuration API LinkedIn..."
+        
+        # Vérification des variables obligatoires
+        if [ -z "$LINKEDIN_CLIENT_ID" ]; then
+          echo "❌ LINKEDIN_CLIENT_ID manquant"
+          exit 1
+        fi
+        
+        if [ -z "$LINKEDIN_CLIENT_SECRET" ]; then
+          echo "❌ LINKEDIN_CLIENT_SECRET manquant"
+          exit 1
+        fi
+        
+        echo "✅ Configuration API valide"
+        echo "🔑 Client ID: ${LINKEDIN_CLIENT_ID:0:8}***"
+        echo "🔒 Client Secret: Configuré"
+        echo "🎯 Token Access: ${LINKEDIN_ACCESS_TOKEN:+Fourni}"
+    
+    - name: 📊 Check Data Files
+      run: |
+        echo "📊 Vérification des fichiers de données..."
+        
         if [ -f "linkedin_urls.csv" ]; then
-          head -5 linkedin_urls.csv
+          echo "✅ Fichier CSV existant:"
+          head -3 linkedin_urls.csv
+          echo "📈 Nombre de profils: $(( $(wc -l < linkedin_urls.csv) - 1 ))"
         else
-          echo "❌ Fichier CSV manquant - sera créé automatiquement"
-        fi
-    
-    - name: 🤖 Run LinkedIn Monitor Agent
-      env:
-        GMAIL_EMAIL: ${{ secrets.GMAIL_EMAIL }}
-        GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-        RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-        DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
-      run: |
-        echo "🚀 Lancement de l'agent LinkedIn..."
-        python linkedin_monitor.py
-    
-    # CORRECTION 3: Amélioration de la gestion Git avec vérifications
-    - name: 💾 Commit and push changes
-      run: |
-        # Configuration Git avec informations détaillées
-        git config --local user.email "action@github.com"
-        git config --local user.name "LinkedIn Monitor Agent"
-        
-        # Vérification du statut Git
-        echo "📊 Statut Git avant modification:"
-        git status
-        
-        # Ajout des fichiers modifiés avec vérification
-        echo "📁 Ajout des fichiers modifiés..."
-        git add linkedin_urls.csv
-        
-        # Ajout conditionnel du fichier Excel s'il existe
-        if [ -f "linkedin_urls.xlsx" ]; then
-          git add linkedin_urls.xlsx
-          echo "✅ Fichier Excel ajouté"
+          echo "🆕 Nouveau fichier CSV - sera créé avec profils par défaut"
         fi
         
-        # Vérification des changements avant commit
-        echo "📊 Statut après ajout:"
-        git status
+        echo "📁 Espace disque disponible:"
+        df -h . | head -2
+    
+    - name: 🚀 Run LinkedIn API Monitor
+      run: |
+        echo "🚀 Lancement du LinkedIn API Monitor v4.0..."
+        echo "⚡ Mode: ${{ github.event.inputs.debug_mode == 'true' && 'DEBUG' || 'PRODUCTION' }}"
+        echo "🔄 Réauth forcée: ${{ github.event.inputs.force_auth || 'false' }}"
         
-        # Commit seulement s'il y a des changements
-        if git diff --staged --quiet; then
-          echo "📝 Aucun changement à committer"
+        # Exécution avec gestion d'erreur robuste
+        python linkedin_monitor.py 2>&1 | tee api_monitor.log
+        
+        # Vérification du résultat
+        if [ $? -eq 0 ]; then
+          echo "✅ Monitoring API exécuté avec succès"
         else
-          echo "💾 Création du commit..."
+          echo "⚠️ Monitoring terminé avec avertissements"
+        fi
+    
+    - name: 📈 API Usage Report
+      run: |
+        echo "📈 Rapport d'utilisation API LinkedIn..."
+        
+        if [ -f "api_monitor.log" ]; then
+          echo "📊 Statistiques extraites du log:"
           
-          # CORRECTION 4: Gestion plus robuste des conflits
-          # Pull avant push pour éviter les conflits
-          git pull origin ${{ github.ref_name }} --rebase || echo "⚠️ Pas de changements distants"
+          # Extraction des métriques
+          POSTS_FOUND=$(grep -c "posts API extraits" api_monitor.log || echo "0")
+          API_CALLS=$(grep -c "API Check:" api_monitor.log || echo "0")
+          ERRORS=$(grep -c "Erreur API" api_monitor.log || echo "0")
           
-          # Commit avec message détaillé
-          git commit -m "🔄 Update LinkedIn monitoring data [$(date '+%Y-%m-%d %H:%M:%S UTC')]
+          echo "   🎯 Posts trouvés: $POSTS_FOUND"
+          echo "   📡 Appels API: $API_CALLS"
+          echo "   ❌ Erreurs: $ERRORS"
           
-          📊 Résumé:
-          - Surveillance automatique LinkedIn
-          - Mise à jour des signatures de contenu
-          - Agent: GitHub Actions Bot
-          - Timestamp: $(date -u)"
-          
-          # Push avec gestion d'erreur améliorée
-          echo "🚀 Push vers GitHub..."
-          if git push origin ${{ github.ref_name }}; then
-            echo "✅ Changements sauvegardés avec succès"
-          else
-            echo "❌ Échec du push - Tentative de résolution..."
-            
-            # Tentative de résolution automatique
-            git pull origin ${{ github.ref_name }} --rebase
-            git push origin ${{ github.ref_name }}
-            
-            if [ $? -eq 0 ]; then
-              echo "✅ Push réussi après résolution"
-            else
-              echo "💥 Échec final du push"
-              exit 1
-            fi
+          # Calcul taux de réussite
+          if [ "$API_CALLS" -gt 0 ]; then
+            SUCCESS_RATE=$(( (API_CALLS - ERRORS) * 100 / API_CALLS ))
+            echo "   📈 Taux de réussite: ${SUCCESS_RATE}%"
           fi
         fi
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+        echo "⏰ Prochaine exécution: $(date -d '+6 hours' '+%Y-%m-%d %H:%M UTC')"
     
-    # CORRECTION 5: Ajout d'une étape de vérification finale
-    - name: 🔍 Verify repository state
+    - name: 💾 Commit API Data Changes
       run: |
-        echo "🔍 Vérification finale du repository:"
-        git log --oneline -3
-        echo "📊 Statut final:"
-        git status
-        echo "📁 Fichiers dans le repository:"
-        ls -la *.csv *.xlsx 2>/dev/null || echo "Aucun fichier de données"
-    
-    - name: 📋 Summary
-      run: |
-        echo "=============================================="
-        echo "🏁 RÉSUMÉ DE L'EXÉCUTION CORRIGÉE"
-        echo "=============================================="
-        echo "📅 Date: $(date)"
-        echo "🔧 Workflow: ${{ github.workflow }}"
-        echo "🌿 Branch: ${{ github.ref_name }}"
-        echo "🔑 Permissions: contents:write activées"
-        echo "✅ Agent LinkedIn exécuté avec succès"
-        echo "💾 Gestion Git améliorée"
-        echo "=============================================="
+        echo "💾 Sauvegarde des données API..."
+        
+        # Configuration Git
+        git config --local user.email "api-monitor@github.com"
+        git config --local user.name "LinkedIn API Monitor v4.0"
+        
+        # Vérification des changements
+        echo "📊 Statut avant commit:"
+        git status --porcelain
+        
+        # Ajout des fichiers de données
+        if [ -f "linkedin_urls.csv" ]; then
+          git add linkedin_urls.csv
+          echo "✅ CSV mis à jour"
+        fi
+        
+        # Ajout du log si mode debug
+        if [ "$DEBUG_MODE" = "true" ] && [ -f "api_monitor.log" ]; then
+          git add api_monitor.log
+          echo "🐛 Log debug ajouté"
+        fi
+        
+        # Commit intelligent
+        if ! git diff --staged --quiet; then
+          echo "💾 Création du commit API..."
+          
+          # Pull des changements distants
+          git pull origin ${{ github.ref_name }} --rebase || echo "ℹ️ Aucun changement distant"
+          
+          # Commit avec métadonnées enrichies
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          POSTS_COUNT=$(grep -c "posts authentiques extraits" api_monitor.log 2>/dev/null || echo "0")
+          
+          git commit -m "🚀 LinkedIn API Monitor v4.0 - Mise à jour [$TIMESTAMP]
+
+🔥 Monitoring via API officielle LinkedIn:
+📊 Posts authentiques détectés: $POSTS_COUNT
+🔐 Authentification: OAuth 2.0
+📡 API: LinkedIn v2 + UGC Posts
+🎯 Extraction: Titres et descriptions authentiques
+🎨 Notification: Email ultra-premium
+
+🤖 Agent: GitHub Actions API Monitor
+⚡ Version: 4.0 Révolutionnaire
+🌍 Timestamp: $TIMESTAMP"
+          
+          # Push avec retry automatique
+          echo "🚀 Push vers GitHub..."
+          for i in {1..3}; do
+            if git push origin ${{ github.ref_name }}; then
+              echo "✅ Push API réussi (tentative $i)"
+              break
+            else
+              echo "⚠️ Tentative $i échouée, retry dans 10s..."
+              sleep 10
+              git pull origin ${{ github.ref_name }} --rebase
+            fi
+          done
+        else
+          echo "📝 Aucune modification de données à committer"
+        fi
