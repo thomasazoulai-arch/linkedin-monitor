@@ -1,5 +1,4 @@
 name: LinkedIn API Monitor v4.0
-
 on:
   schedule:
     # Exécution optimisée chaque jour à 7h
