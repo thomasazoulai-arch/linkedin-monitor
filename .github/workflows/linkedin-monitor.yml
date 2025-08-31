@@ -513,7 +513,7 @@ jobs:
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           git commit -m "🚀 LinkedIn API v4.0 - Monitoring Update [$TIMESTAMP]
 
-🔥 API LinkedIn officielle activée
+"🔥 API LinkedIn officielle activée
 🔐 OAuth 2.0 authentification réussie
 🎯 Extraction authentique des posts avec vrais titres
 📧 Email premium avec données d'engagement réelles
