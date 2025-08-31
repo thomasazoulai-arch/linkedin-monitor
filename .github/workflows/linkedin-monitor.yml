@@ -487,8 +487,8 @@ jobs:
           python linkedin_api_monitor.py
         fi
         
-        echo ""
-        echo "🏁 Monitoring terminé"
+        #echo ""
+        #echo "🏁 Monitoring terminé"
     - name: 💾 Commit Changes
       run: |
         echo "💾 Sauvegarde des modifications..."
