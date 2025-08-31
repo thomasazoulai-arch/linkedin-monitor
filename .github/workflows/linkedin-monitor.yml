@@ -486,7 +486,6 @@ jobs:
           echo "📝 Exécution du script API intégré..."
           python linkedin_api_monitor.py
         fi
-
     - name: 💾 Commit Changes
       run: |
         echo "💾 Sauvegarde des modifications..."
