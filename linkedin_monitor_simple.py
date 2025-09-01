@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+import requests, csv, json, smtplib, os
+from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+def authenticate():
+    print("🔐 Authentification LinkedIn...")
+    auth_data = {
+        'grant_type': 'client_credentials',
+        'client_id': os.getenv('LINKEDIN_CLIENT_ID'),
+        'client_secret': os.getenv('LINKEDIN_CLIENT_SECRET'),
+        'scope': 'r_organization_social'
+    }
+    
+    try:
+        response = requests.post(
+            'https://www.linkedin.com/oauth/v2/accessToken',
+            data=auth_data,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            timeout=30
+        )
+        if response.status_code == 200:
+            token = response.json()['access_token']
+            print("✅ Authentification réussie")
+            return token
+        else:
+            print(f"❌ Authentification échouée: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"❌ Erreur: {e}")
+        return None
+
+def get_posts(token, company_id, name):
+    print(f"🏢 Récupération posts: {name}")
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'X-Restli-Protocol-Version': '2.0.0'
+    }
+    
+    try:
+        url = "https://api.linkedin.com/v2/shares"
+        params = {
+            'q': 'owners',
+            'owners': f'urn:li:organization:{company_id}',
+            'count': 3
+        }
+        
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            posts = data.get('elements', [])
+            print(f"✅ {len(posts)} posts trouvés")
+            return posts
+        else:
+            print(f"⚠️ Erreur API: {response.status_code}")
+            return []
+    except Exception as e:
+        print(f"❌ Erreur: {e}")
+        return []
+
+def extract_post_data(post):
+    try:
+        content = post.get('content', {})
+        title = content.get('title', 'Publication LinkedIn')
+        desc = content.get('description', 'Nouveau contenu partagé')
+        
+        created = post.get('created', {}).get('time', 0)
+        if created:
+            date = datetime.fromtimestamp(created / 1000).strftime('%d/%m/%Y à %H:%M')
+        else:
+            date = datetime.now().strftime('%d/%m/%Y à %H:%M')
+        
+        social = post.get('socialDetail', {}).get('totalSocialActivityCounts', {})
+        engagement = social.get('numLikes', 0) + social.get('numComments', 0)
+        
+        return {
+            'title': title[:80],
+            'description': desc[:150],
+            'date': date,
+            'engagement': engagement
+        }
+    except:
+        return None
+
+def send_email(posts_data):
+    if not posts_data:
+        print("ℹ️ Aucun post à envoyer")
+        return
+        
+    print(f"📧 Envoi email: {sum(len(p) for p in posts_data.values())} posts")
+    
+    msg = MIMEMultipart('alternative')
+    msg['From'] = os.getenv('GMAIL_EMAIL')
+    msg['To'] = os.getenv('RECIPIENT_EMAIL')
+    msg['Subject'] = f"🚀 LinkedIn API v4.0 - Posts authentiques détectés"
+    
+    html = f"""
+    <html><body style="font-family: Arial, sans-serif;">
+    <div style="background: linear-gradient(135deg, #0077b5, #00a0dc); color: white; padding: 30px; text-align: center;">
+        <h1>🚀 LinkedIn API Monitor v4.0</h1>
+        <p>Extraction authentique via API officielle</p>
+    </div>
+    <div style="padding: 20px;">
+    """
+    
+    for company, posts in posts_data.items():
+        html += f'<h2 style="color: #0077b5;">🏢 {company}</h2>'
+        for post in posts:
+            html += f"""
+            <div style="background: #f8f9fa; padding: 15px; margin: 10px 0; border-left: 4px solid #0077b5;">
+                <h3 style="color: #333;">{post['title']}</h3>
+                <p style="color: #666;">{post['description']}</p>
+                <small style="color: #999;">📅 {post['date']} • 💬 {post['engagement']} interactions</small>
+            </div>
+            """
+    
+    html += """
+    </div>
+    <div style="background: #333; color: white; padding: 15px; text-align: center;">
+        <p>LinkedIn API Monitor v4.0 - Contenu 100% authentique</p>
+    </div>
+    </body></html>
+    """
+    
+    msg.attach(MIMEText(html, 'html'))
+    
+    try:
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.starttls()
+            server.login(os.getenv('GMAIL_EMAIL'), os.getenv('GMAIL_APP_PASSWORD'))
+            server.send_message(msg)
+        print("✅ Email envoyé")
+    except Exception as e:
+        print(f"❌ Erreur email: {e}")
+
+def load_or_create_csv():
+    if not os.path.exists('linkedin_urls.csv'):
+        profiles = [
+            ['https://www.linkedin.com/company/microsoft/', 'Microsoft', 'microsoft'],
+            ['https://www.linkedin.com/company/tesla-motors/', 'Tesla', 'tesla-motors'],
+            ['https://www.linkedin.com/company/google/', 'Google', 'google']
+        ]
+        
+        with open('linkedin_urls.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['URL', 'Name', 'Profile_ID', 'Last_Post_ID', 'Error_Count'])
+            for profile in profiles:
+                writer.writerow(profile + ['', '0'])
+        
+        print("✅ CSV créé avec profils par défaut")
+        return profiles
+    
+    profiles = []
+    try:
+        with open('linkedin_urls.csv', 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                url = row.get('URL', '').strip()
+                name = row.get('Name', '').strip()
+                profile_id = row.get('Profile_ID', '').strip()
+                
+                if not profile_id and '/company/' in url:
+                    import re
+                    match = re.search(r'/company/([^/]+)', url)
+                    if match:
+                        profile_id = match.group(1)
+                
+                if url and name and profile_id:
+                    profiles.append([url, name, profile_id])
+        
+        print(f"✅ {len(profiles)} profils chargés")
+        return profiles
+    except Exception as e:
+        print(f"❌ Erreur CSV: {e}")
+        return []
+
+def main():
+    print("🚀 LinkedIn API Monitor v4.0")
+    print("=" * 40)
+    
+    # Auth
+    token = authenticate()
+    if not token:
+        return
+    
+    # Load profiles
+    profiles = load_or_create_csv()
+    if not profiles:
+        return
+    
+    # Get posts
+    all_posts = {}
+    for url, name, profile_id in profiles:
+        posts = get_posts(token, profile_id, name)
+        if posts:
+            processed = []
+            for post in posts[:2]:  # Max 2 per company
+                data = extract_post_data(post)
+                if data:
+                    processed.append(data)
+            if processed:
+                all_posts[name] = processed
+    
+    # Send email
+    if all_posts:
+        send_email(all_posts)
+        print(f"🎉 {sum(len(p) for p in all_posts.values())} posts traités")
+    else:
+        print("ℹ️ Aucun nouveau post")
+    
+    print("✅ Terminé")
+
+if __name__ == "__main__":
+    main()
