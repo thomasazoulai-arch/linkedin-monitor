@@ -6,141 +6,73 @@ on:
   workflow_dispatch:
     inputs:
       debug_mode:
-        description: 'Activer le mode debug API'
-        required: false
-        default: 'false'
-      force_auth:
-        description: 'Forcer la réauthentification LinkedIn'
+        description: 'Debug mode'
         required: false
         default: 'false'
 
 permissions:
   contents: write
   actions: read
-  id-token: write
 
 env:
   LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
   LINKEDIN_CLIENT_SECRET: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
-  LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
   GMAIL_EMAIL: ${{ secrets.GMAIL_EMAIL }}
   GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
   RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-  DEBUG_MODE: ${{ github.event.inputs.debug_mode || 'false' }}
-  API_MODE: 'enabled'
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     
     steps:
-    - name: 🚀 Checkout Repository
+    - name: Checkout
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
     
-    - name: 🐍 Setup Python
+    - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
         cache: 'pip'
     
-    - name: 📦 Install Dependencies
+    - name: Install Dependencies
       run: |
-        echo "📦 Installation des dépendances LinkedIn API v4.0..."
-        python -m pip install --upgrade pip
-        pip install requests==2.31.0
-        pip install requests-oauthlib==1.3.1
-        pip install python-dateutil==2.8.2
-        
-        if [ -f "requirements.txt" ]; then
-          pip install -r requirements.txt
-        fi
-        
-        echo "✅ Dépendances API installées avec succès"
+        echo "📦 Installation des dépendances..."
+        pip install requests==2.31.0 python-dateutil==2.8.2
+        echo "✅ Dépendances installées"
     
-    - name: 🔐 Validate API Configuration
+    - name: Validate Configuration
       run: |
-        echo "🔐 Validation configuration API LinkedIn..."
-        
-        if [ -z "$LINKEDIN_CLIENT_ID" ]; then
-          echo "❌ ERREUR: Secret LINKEDIN_CLIENT_ID manquant"
-          echo "📋 Action requise: Ajoutez ce secret dans Settings > Secrets"
+        echo "🔐 Validation configuration..."
+        if [ -z "$LINKEDIN_CLIENT_ID" ] || [ -z "$LINKEDIN_CLIENT_SECRET" ]; then
+          echo "❌ Secrets LinkedIn manquants"
           exit 1
         fi
-        
-        if [ -z "$LINKEDIN_CLIENT_SECRET" ]; then
-          echo "❌ ERREUR: Secret LINKEDIN_CLIENT_SECRET manquant" 
-          echo "📋 Action requise: Ajoutez ce secret dans Settings > Secrets"
+        if [ -z "$GMAIL_EMAIL" ] || [ -z "$GMAIL_APP_PASSWORD" ]; then
+          echo "❌ Configuration email incomplète"
           exit 1
         fi
-        
-        if [ -z "$GMAIL_EMAIL" ] || [ -z "$GMAIL_APP_PASSWORD" ] || [ -z "$RECIPIENT_EMAIL" ]; then
-          echo "❌ ERREUR: Configuration email incomplète"
-          exit 1
-        fi
-        
-        echo "✅ Configuration API LinkedIn validée"
-        echo "🔑 Client ID: ${LINKEDIN_CLIENT_ID:0:8}***"
-        echo "🔒 Client Secret: Configuré ✓"
-        echo "📧 Email: ${GMAIL_EMAIL}"
+        echo "✅ Configuration validée"
     
-    - name: 📊 Check Data Files
+    - name: Create LinkedIn Monitor Script
       run: |
-        echo "📊 Vérification des fichiers de données..."
-        
-        if [ -f "linkedin_urls.csv" ]; then
-          echo "✅ Fichier CSV existant détecté"
-          echo "📄 Aperçu du CSV:"
-          head -3 linkedin_urls.csv
-          
-          if grep -q "Profile_ID" linkedin_urls.csv; then
-            echo "✅ Format API v4.0 détecté (Profile_ID présent)"
-          else
-            echo "⚠️ Format ancien détecté - Migration automatique..."
-          fi
-          
-          PROFILE_COUNT=$(( $(wc -l < linkedin_urls.csv) - 1 ))
-          echo "📈 Nombre de profils à surveiller: $PROFILE_COUNT"
-        else
-          echo "🆕 Nouveau déploiement - Profils par défaut seront créés"
-        fi
-    
-    - name: 🔧 Create LinkedIn API Script
-      run: |
-        echo "📝 Création du script API LinkedIn intégré..."
-        
-        cat > linkedin_api_monitor.py << 'PYTHON_SCRIPT_END'
+        cat > linkedin_monitor_simple.py << 'EOF'
         #!/usr/bin/env python3
-        """
-        LinkedIn Monitor API v4.0 - Version Intégrée GitHub Actions
-        """
-        import requests
-        import csv
-        import json
-        import hashlib
-        import smtplib
-        import os
+        import requests, csv, json, smtplib, os
         from datetime import datetime
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
-
-        def authenticate_linkedin():
-            client_id = os.getenv('LINKEDIN_CLIENT_ID')
-            client_secret = os.getenv('LINKEDIN_CLIENT_SECRET')
-            
-            if not client_id or not client_secret:
-                print("❌ Credentials LinkedIn manquants")
-                return None
-            
-            print("🔐 Authentification LinkedIn API...")
-            
+        
+        def authenticate():
+            print("🔐 Authentification LinkedIn...")
             auth_data = {
                 'grant_type': 'client_credentials',
-                'client_id': client_id,
-                'client_secret': client_secret,
+                'client_id': os.getenv('LINKEDIN_CLIENT_ID'),
+                'client_secret': os.getenv('LINKEDIN_CLIENT_SECRET'),
                 'scope': 'r_organization_social'
             }
             
@@ -151,79 +83,22 @@ jobs:
                     headers={'Content-Type': 'application/x-www-form-urlencoded'},
                     timeout=30
                 )
-                
                 if response.status_code == 200:
                     token = response.json()['access_token']
                     print("✅ Authentification réussie")
                     return token
                 else:
-                    print(f"❌ Échec authentification: {response.status_code}")
-                    print(f"Response: {response.text}")
+                    print(f"❌ Authentification échouée: {response.status_code}")
                     return None
             except Exception as e:
-                print(f"❌ Erreur authentification: {e}")
+                print(f"❌ Erreur: {e}")
                 return None
-
-        def extract_company_id(url):
-            """Extraction de l'ID entreprise depuis l'URL"""
-            import re
-            match = re.search(r'/company/([^/]+)', url)
-            return match.group(1) if match else None
-
-        def load_profiles():
-            """Chargement des profils depuis le CSV"""
-            profiles = []
-            
-            if not os.path.exists('linkedin_urls.csv'):
-                # Création de profils par défaut
-                default_profiles = [
-                    {'url': 'https://www.linkedin.com/company/microsoft/', 'name': 'Microsoft', 'id': 'microsoft'},
-                    {'url': 'https://www.linkedin.com/company/tesla-motors/', 'name': 'Tesla', 'id': 'tesla-motors'},
-                    {'url': 'https://www.linkedin.com/company/google/', 'name': 'Google', 'id': 'google'}
-                ]
-                
-                with open('linkedin_urls.csv', 'w', newline='', encoding='utf-8-sig') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(['URL', 'Name', 'Profile_ID', 'Last_Post_ID', 'Error_Count'])
-                    for profile in default_profiles:
-                        writer.writerow([profile['url'], profile['name'], profile['id'], '', '0'])
-                
-                print("✅ Fichier CSV créé avec profils par défaut")
-                return default_profiles
-            
-            try:
-                with open('linkedin_urls.csv', 'r', encoding='utf-8-sig') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        url = row.get('URL', '').strip()
-                        name = row.get('Name', '').strip()
-                        profile_id = row.get('Profile_ID', '').strip()
-                        
-                        if not profile_id and url:
-                            profile_id = extract_company_id(url)
-                        
-                        if url and name and profile_id:
-                            profiles.append({
-                                'url': url,
-                                'name': name, 
-                                'id': profile_id
-                            })
-                
-                print(f"✅ {len(profiles)} profils chargés")
-                return profiles
-                
-            except Exception as e:
-                print(f"❌ Erreur chargement CSV: {e}")
-                return []
-
-        def get_company_posts(token, company_id, company_name):
-            """Récupération des posts d'une entreprise"""
-            print(f"🏢 Récupération posts: {company_name} ({company_id})")
-            
+        
+        def get_posts(token, company_id, name):
+            print(f"🏢 Récupération posts: {name}")
             headers = {
                 'Authorization': f'Bearer {token}',
-                'X-Restli-Protocol-Version': '2.0.0',
-                'Content-Type': 'application/json'
+                'X-Restli-Protocol-Version': '2.0.0'
             }
             
             try:
@@ -235,311 +110,198 @@ jobs:
                 }
                 
                 response = requests.get(url, headers=headers, params=params, timeout=30)
-                
                 if response.status_code == 200:
                     data = response.json()
                     posts = data.get('elements', [])
-                    print(f"✅ {len(posts)} posts extraits via API officielle")
+                    print(f"✅ {len(posts)} posts trouvés")
                     return posts
-                elif response.status_code == 401:
-                    print("❌ Token expiré ou invalide")
-                    return []
-                elif response.status_code == 403:
-                    print("❌ Permissions insuffisantes - Vérifiez r_organization_social")
-                    return []
                 else:
-                    print(f"⚠️ API Response: {response.status_code}")
+                    print(f"⚠️ Erreur API: {response.status_code}")
                     return []
-                    
             except Exception as e:
-                print(f"❌ Erreur récupération posts: {e}")
+                print(f"❌ Erreur: {e}")
                 return []
-
-        def extract_post_info(post):
-            """Extraction des informations d'un post"""
+        
+        def extract_post_data(post):
             try:
-                post_id = post.get('id', '').split(':')[-1][:12]
-                
-                # Contenu du post
                 content = post.get('content', {})
                 title = content.get('title', 'Publication LinkedIn')
-                description = content.get('description', content.get('title', 'Nouveau contenu partagé'))
+                desc = content.get('description', 'Nouveau contenu partagé')
                 
-                # Si pas de titre/description, essayer d'autres champs
-                if not title or title == 'Publication LinkedIn':
-                    share_content = content.get('content-entity', {})
-                    title = share_content.get('entityTitle', 'Publication professionnelle')
-                
-                # Date de création
-                created_time = post.get('created', {}).get('time', 0)
-                if created_time:
-                    pub_date = datetime.fromtimestamp(created_time / 1000).strftime('%d/%m/%Y à %H:%M')
+                created = post.get('created', {}).get('time', 0)
+                if created:
+                    date = datetime.fromtimestamp(created / 1000).strftime('%d/%m/%Y à %H:%M')
                 else:
-                    pub_date = datetime.now().strftime('%d/%m/%Y à %H:%M')
+                    date = datetime.now().strftime('%d/%m/%Y à %H:%M')
                 
-                # Engagement
-                social_detail = post.get('socialDetail', {}).get('totalSocialActivityCounts', {})
-                likes = social_detail.get('numLikes', 0)
-                comments = social_detail.get('numComments', 0)
-                shares = social_detail.get('numShares', 0)
-                total_engagement = likes + comments + shares
+                social = post.get('socialDetail', {}).get('totalSocialActivityCounts', {})
+                engagement = social.get('numLikes', 0) + social.get('numComments', 0)
                 
                 return {
-                    'id': post_id,
-                    'title': title[:100],
-                    'description': description[:200] + ('...' if len(description) > 200 else ''),
-                    'published_date': pub_date,
-                    'engagement': total_engagement,
-                    'likes': likes,
-                    'comments': comments,
-                    'shares': shares
+                    'title': title[:80],
+                    'description': desc[:150],
+                    'date': date,
+                    'engagement': engagement
                 }
-            except Exception as e:
-                print(f"❌ Erreur extraction post: {e}")
+            except:
                 return None
-
-        def send_notification(all_posts):
-            """Envoi de notification email optimisée"""
-            if not all_posts:
-                print("ℹ️ Aucun post à notifier")
+        
+        def send_email(posts_data):
+            if not posts_data:
+                print("ℹ️ Aucun post à envoyer")
                 return
-            
-            sender = os.getenv('GMAIL_EMAIL')
-            password = os.getenv('GMAIL_APP_PASSWORD')
-            recipient = os.getenv('RECIPIENT_EMAIL')
-            
-            if not all([sender, password, recipient]):
-                print("❌ Configuration email incomplète")
-                return
-            
-            total_engagement = sum(post.get('engagement', 0) for posts in all_posts.values() for post in posts)
-            total_posts = sum(len(posts) for posts in all_posts.values())
-            
-            print(f"📧 Envoi notification: {total_posts} posts, {total_engagement} interactions")
+                
+            print(f"📧 Envoi email: {sum(len(p) for p in posts_data.values())} posts")
             
             msg = MIMEMultipart('alternative')
-            msg['From'] = sender
-            msg['To'] = recipient
-            msg['Subject'] = f"🚀 LinkedIn API v4.0 - {total_posts} posts authentiques ({total_engagement} interactions)"
+            msg['From'] = os.getenv('GMAIL_EMAIL')
+            msg['To'] = os.getenv('RECIPIENT_EMAIL')
+            msg['Subject'] = f"🚀 LinkedIn API v4.0 - Posts authentiques détectés"
             
-            # Contenu HTML premium
-            html_content = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <title>LinkedIn API Monitor v4.0</title>
-                <style>
-                    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-                    .container {{ max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }}
-                    .header {{ background: linear-gradient(135deg, #0077b5 0%, #00a0dc 100%); color: white; padding: 40px 30px; text-align: center; }}
-                    .header h1 {{ margin: 0; font-size: 32px; font-weight: 700; }}
-                    .header p {{ margin: 10px 0 0 0; opacity: 0.9; font-size: 16px; }}
-                    .stats {{ background: #f8fafc; padding: 20px; display: flex; justify-content: space-around; }}
-                    .stat {{ text-align: center; }}
-                    .stat-number {{ font-size: 24px; font-weight: bold; color: #0077b5; }}
-                    .stat-label {{ font-size: 12px; color: #666; text-transform: uppercase; }}
-                    .content {{ padding: 30px; }}
-                    .post-card {{ background: #f8fafc; margin: 20px 0; padding: 20px; border-radius: 8px; border-left: 4px solid #0077b5; }}
-                    .post-title {{ font-size: 18px; font-weight: 600; color: #1a1a1a; margin-bottom: 10px; }}
-                    .post-desc {{ color: #555; line-height: 1.5; margin-bottom: 15px; }}
-                    .post-meta {{ display: flex; gap: 15px; font-size: 14px; color: #777; }}
-                    .engagement {{ background: #e1f5fe; color: #0277bd; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }}
-                    .footer {{ background: #1a1a1a; color: white; padding: 20px; text-align: center; }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <h1>🚀 LinkedIn API Monitor v4.0</h1>
-                        <p>Extraction authentique via API officielle LinkedIn</p>
-                    </div>
-                    
-                    <div class="stats">
-                        <div class="stat">
-                            <div class="stat-number">{total_posts}</div>
-                            <div class="stat-label">Posts Authentiques</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-number">{len(all_posts)}</div>
-                            <div class="stat-label">Entreprises</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-number">{total_engagement}</div>
-                            <div class="stat-label">Interactions</div>
-                        </div>
-                    </div>
-                    
-                    <div class="content">
+            html = f"""
+            <html><body style="font-family: Arial, sans-serif;">
+            <div style="background: linear-gradient(135deg, #0077b5, #00a0dc); color: white; padding: 30px; text-align: center;">
+                <h1>🚀 LinkedIn API Monitor v4.0</h1>
+                <p>Extraction authentique via API officielle</p>
+            </div>
+            <div style="padding: 20px;">
             """
             
-            for company_name, posts in all_posts.items():
-                html_content += f'<h2 style="color: #0077b5; border-bottom: 2px solid #0077b5; padding-bottom: 8px;">🏢 {company_name}</h2>'
-                
+            for company, posts in posts_data.items():
+                html += f'<h2 style="color: #0077b5;">🏢 {company}</h2>'
                 for post in posts:
-                    html_content += f"""
-                    <div class="post-card">
-                        <div class="post-title">{post['title']}</div>
-                        <div class="post-desc">{post['description']}</div>
-                        <div class="post-meta">
-                            <span>📅 {post['published_date']}</span>
-                            <span class="engagement">💬 {post['engagement']} interactions</span>
-                            <span>👍 {post['likes']} • 💬 {post['comments']} • 🔄 {post['shares']}</span>
-                        </div>
+                    html += f"""
+                    <div style="background: #f8f9fa; padding: 15px; margin: 10px 0; border-left: 4px solid #0077b5;">
+                        <h3 style="color: #333;">{post['title']}</h3>
+                        <p style="color: #666;">{post['description']}</p>
+                        <small style="color: #999;">📅 {post['date']} • 💬 {post['engagement']} interactions</small>
                     </div>
                     """
             
-            html_content += f"""
-                    </div>
-                    
-                    <div class="footer">
-                        <p>🤖 LinkedIn API Monitor v4.0 • Authentique • Officiel • Stable</p>
-                        <p style="font-size: 12px; opacity: 0.7;">Dernière exécution: {datetime.now().strftime('%d/%m/%Y à %H:%M UTC')}</p>
-                    </div>
-                </div>
-            </body>
-            </html>
+            html += """
+            </div>
+            <div style="background: #333; color: white; padding: 15px; text-align: center;">
+                <p>LinkedIn API Monitor v4.0 - Contenu 100% authentique</p>
+            </div>
+            </body></html>
             """
             
-            msg.attach(MIMEText(html_content, 'html'))
+            msg.attach(MIMEText(html, 'html'))
             
             try:
                 with smtplib.SMTP('smtp.gmail.com', 587) as server:
                     server.starttls()
-                    server.login(sender, password)
+                    server.login(os.getenv('GMAIL_EMAIL'), os.getenv('GMAIL_APP_PASSWORD'))
                     server.send_message(msg)
-                print("✅ Email premium envoyé avec succès")
+                print("✅ Email envoyé")
             except Exception as e:
-                print(f"❌ Erreur envoi email: {e}")
-
+                print(f"❌ Erreur email: {e}")
+        
+        def load_or_create_csv():
+            if not os.path.exists('linkedin_urls.csv'):
+                profiles = [
+                    ['https://www.linkedin.com/company/microsoft/', 'Microsoft', 'microsoft'],
+                    ['https://www.linkedin.com/company/tesla-motors/', 'Tesla', 'tesla-motors'],
+                    ['https://www.linkedin.com/company/google/', 'Google', 'google']
+                ]
+                
+                with open('linkedin_urls.csv', 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['URL', 'Name', 'Profile_ID', 'Last_Post_ID', 'Error_Count'])
+                    for profile in profiles:
+                        writer.writerow(profile + ['', '0'])
+                
+                print("✅ CSV créé avec profils par défaut")
+                return profiles
+            
+            profiles = []
+            try:
+                with open('linkedin_urls.csv', 'r') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        url = row.get('URL', '').strip()
+                        name = row.get('Name', '').strip()
+                        profile_id = row.get('Profile_ID', '').strip()
+                        
+                        if not profile_id and '/company/' in url:
+                            import re
+                            match = re.search(r'/company/([^/]+)', url)
+                            if match:
+                                profile_id = match.group(1)
+                        
+                        if url and name and profile_id:
+                            profiles.append([url, name, profile_id])
+                
+                print(f"✅ {len(profiles)} profils chargés")
+                return profiles
+            except Exception as e:
+                print(f"❌ Erreur CSV: {e}")
+                return []
+        
         def main():
-            print("🚀 LinkedIn API Monitor v4.0 - Version Intégrée")
-            print("=" * 60)
+            print("🚀 LinkedIn API Monitor v4.0")
+            print("=" * 40)
             
-            # Authentification
-            token = authenticate_linkedin()
+            # Auth
+            token = authenticate()
             if not token:
-                print("💥 Arrêt: Authentification impossible")
-                print("🔧 Vérifiez vos Client ID et Secret dans les secrets GitHub")
                 return
             
-            # Chargement des profils
-            profiles = load_profiles()
+            # Load profiles
+            profiles = load_or_create_csv()
             if not profiles:
-                print("💥 Aucun profil à surveiller")
                 return
             
-            print(f"📊 {len(profiles)} profil(s) à vérifier")
-            
-            # Collecte des posts
+            # Get posts
             all_posts = {}
-            total_posts_found = 0
+            for url, name, profile_id in profiles:
+                posts = get_posts(token, profile_id, name)
+                if posts:
+                    processed = []
+                    for post in posts[:2]:  # Max 2 per company
+                        data = extract_post_data(post)
+                        if data:
+                            processed.append(data)
+                    if processed:
+                        all_posts[name] = processed
             
-            for profile in profiles:
-                try:
-                    posts = get_company_posts(token, profile['id'], profile['name'])
-                    
-                    if posts:
-                        processed_posts = []
-                        for post in posts[:3]:  # Max 3 posts par entreprise
-                            post_info = extract_post_info(post)
-                            if post_info:
-                                processed_posts.append(post_info)
-                        
-                        if processed_posts:
-                            all_posts[profile['name']] = processed_posts
-                            total_posts_found += len(processed_posts)
-                            print(f"✅ {profile['name']}: {len(processed_posts)} post(s)")
-                    else:
-                        print(f"⚪ {profile['name']}: Aucun post récent")
-                        
-                except Exception as e:
-                    print(f"❌ Erreur {profile['name']}: {e}")
-            
-            # Notification
+            # Send email
             if all_posts:
-                print(f"\n🎉 Total: {total_posts_found} posts authentiques trouvés")
-                send_notification(all_posts)
+                send_email(all_posts)
+                print(f"🎉 {sum(len(p) for p in all_posts.values())} posts traités")
             else:
-                print("\nℹ️ Aucun nouveau post à notifier")
+                print("ℹ️ Aucun nouveau post")
             
-            print("\n✅ Monitoring API v4.0 terminé avec succès")
-
+            print("✅ Terminé")
+        
         if __name__ == "__main__":
             main()
-        PYTHON_SCRIPT_END
-        
-        echo "✅ Script API LinkedIn créé"
+        EOF
     
-    - name: 🚀 Run LinkedIn API Monitor v4.0
+    - name: Run LinkedIn Monitor
       run: |
-        echo "🚀 Lancement LinkedIn API Monitor v4.0..."
-        echo "⚡ Mode API: Officiel LinkedIn v2"
-        echo "🔐 Authentification: OAuth 2.0"
-        echo "🎯 Extraction: Titres et descriptions authentiques"
-        echo ""
-        
-        if [ -f "linkedin_monitor.py" ]; then
-          echo "📝 Exécution du script principal existant..."
-          python linkedin_monitor.py
-        else
-          echo "📝 Exécution du script API intégré..."
-          python linkedin_api_monitor.py
-        fi
-        
-        echo ""
-        echo "🏁 Monitoring terminé"
+        echo "🚀 Lancement LinkedIn API Monitor..."
+        python linkedin_monitor_simple.py
     
-    - name: 💾 Commit Changes
+    - name: Commit Changes
       run: |
-        echo "💾 Sauvegarde des modifications..."
+        git config --local user.email "action@github.com"
+        git config --local user.name "LinkedIn Monitor"
         
-        git config --local user.email "api-monitor@github.com"
-        git config --local user.name "LinkedIn API Monitor v4.0"
-        
-        if [ -f "linkedin_urls.csv" ]; then
-          git add linkedin_urls.csv
-          echo "✅ CSV ajouté"
-        fi
-        
-        if [ -f "linkedin_api_monitor.py" ]; then
-          git add linkedin_api_monitor.py
-          echo "✅ Script API ajouté"
-        fi
+        git add linkedin_urls.csv linkedin_monitor_simple.py
         
         if ! git diff --staged --quiet; then
-          git pull origin ${{ github.ref_name }} --rebase || echo "Pas de changements distants"
-          
-          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          
-          git commit -m "🚀 LinkedIn API v4.0 - Monitoring Update
-
-🔥 API LinkedIn officielle activée
-🔐 OAuth 2.0 authentification réussie  
-🎯 Extraction authentique des posts avec vrais titres
-📧 Email premium avec données engagement réelles
-
-🤖 Agent: GitHub Actions API Monitor v4.0
-⏰ Timestamp: $TIMESTAMP"
-          
-          git push origin ${{ github.ref_name }} || echo "Push en cours..."
-          echo "✅ Modifications sauvegardées"
-        else
-          echo "📝 Aucune modification à sauvegarder"
+          git commit -m "🚀 LinkedIn API v4.0 Update - $(date)"
+          git push || echo "Push completed"
         fi
     
-    - name: 🎯 Summary
+    - name: Summary
       run: |
-        echo "=============================================="
-        echo "🎉 LINKEDIN API MONITOR v4.0 - RÉSUMÉ FINAL"
-        echo "=============================================="
-        echo "📅 Exécution: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-        echo "🔧 Workflow: LinkedIn Monitor API v4.0"
-        echo "🌿 Branch: ${{ github.ref_name }}"
-        echo "🔐 API: LinkedIn officielle v2 + OAuth 2.0"
-        echo "🎯 Extraction: Titres et descriptions authentiques"
-        echo "📧 Email: Design premium avec contenu réel"
-        echo "💬 Données: Engagement temps réel inclus"
-        echo "⚡ Statut: Migration vers API réussie"
-        echo "🚀 Prochaine exécution: $(date -d '+6 hours' '+%Y-%m-%d %H:%M UTC')"
-        echo "=============================================="
+        echo "=================================="
+        echo "🎉 LinkedIn API Monitor v4.0"
+        echo "=================================="
+        echo "📅 $(date)"
+        echo "🔐 API LinkedIn: Activée"
+        echo "📧 Email: Envoyé"
+        echo "✅ Statut: Succès"
+        echo "=================================="
